@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Guard 管理面板</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/naive-ui"></script>
+  <style>
+    body { margin: 0; font-family: Inter, PingFang SC, Microsoft YaHei, sans-serif; background: linear-gradient(135deg, #081120 0%, #101827 55%, #0f172a 100%); color: #e5e7eb; }
+    .shell { min-height: 100vh; padding: 32px; box-sizing: border-box; }
+    .card { background: rgba(15, 23, 42, 0.78); border: 1px solid rgba(148, 163, 184, 0.18); border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,.35); backdrop-filter: blur(12px); }
+    .hero { padding: 28px; margin-bottom: 20px; display:flex; justify-content:space-between; gap:16px; align-items:flex-end; }
+    .grid { display:grid; grid-template-columns: 1.1fr .9fr; gap: 20px; }
+    .panel { padding: 24px; }
+    .muted { color:#94a3b8; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    input, button { font: inherit; }
+    .btn { background:#22c55e; color:#04111b; border:0; padding:10px 14px; border-radius:12px; cursor:pointer; font-weight:700; }
+    .btn.secondary { background:#334155; color:#e2e8f0; }
+    .field { width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(148,163,184,.2); background:#0b1220; color:#e5e7eb; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding: 10px 8px; border-bottom: 1px solid rgba(148,163,184,.12); text-align:left; }
+  </style>
+</head>
+<body>
+  <div id="app" class="shell"></div>
+  <script>
+    const { createApp, ref, onMounted } = Vue
+    const App = {
+      setup() {
+        const token = ref(localStorage.getItem('guard_token') || '')
+        const password = ref('')
+        const message = ref('')
+        const dashboard = ref(null)
+        const users = ref([])
+        const settings = ref(null)
+
+        const headers = () => token.value ? { Authorization: `Bearer ${token.value}` } : {}
+
+        const login = async () => {
+          const res = await fetch('/guard/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: password.value })
+          })
+          const data = await res.json()
+          if (res.ok && data.token) {
+            token.value = data.token
+            localStorage.setItem('guard_token', data.token)
+            message.value = '登录成功'
+            await loadAll()
+          } else {
+            message.value = data.message || '登录失败'
+          }
+        }
+
+        const loadAll = async () => {
+          const [d, u, s] = await Promise.all([
+            fetch('/guard/api/dashboard', { headers: headers() }).then(r => r.json()).catch(() => null),
+            fetch('/guard/api/users', { headers: headers() }).then(r => r.json()).catch(() => null),
+            fetch('/guard/api/settings', { headers: headers() }).then(r => r.json()).catch(() => null),
+          ])
+          dashboard.value = d
+          users.value = u?.items || []
+          settings.value = s?.data || null
+        }
+
+        const toggleWhitelist = async (id, flag) => {
+          await fetch(`/guard/api/whitelist/${id}`, { method: flag ? 'POST' : 'DELETE', headers: headers() })
+          await loadAll()
+        }
+
+        onMounted(() => { if (token.value) loadAll() })
+
+        return () => Vue.h('div', [
+          Vue.h('div', { class: 'card hero' }, [
+            Vue.h('div', [
+              Vue.h('div', { style: 'font-size: 30px; font-weight: 800;' }, 'New API Guard'),
+              Vue.h('div', { class: 'muted' }, '透明守卫层管理面板')
+            ]),
+            Vue.h('div', { style: 'min-width: 280px;' }, [
+              Vue.h('input', { class: 'field', placeholder: '管理密码', value: password.value, onInput: e => password.value = e.target.value }),
+              Vue.h('div', { class: 'row', style: 'margin-top:12px;' }, [
+                Vue.h('button', { class: 'btn', onClick: login }, '登录'),
+                Vue.h('button', { class: 'btn secondary', onClick: loadAll }, '刷新')
+              ])
+            ])
+          ]),
+          Vue.h('div', { class: 'grid' }, [
+            Vue.h('div', { class: 'card panel' }, [
+              Vue.h('h3', null, '总览'),
+              dashboard.value ? Vue.h('pre', { style: 'white-space: pre-wrap;' }, JSON.stringify(dashboard.value, null, 2)) : Vue.h('div', { class: 'muted' }, '暂无数据')
+            ]),
+            Vue.h('div', { class: 'card panel' }, [
+              Vue.h('h3', null, '系统配置'),
+              settings.value ? Vue.h('pre', { style: 'white-space: pre-wrap;' }, JSON.stringify(settings.value, null, 2)) : Vue.h('div', { class: 'muted' }, '暂无数据')
+            ])
+          ]),
+          Vue.h('div', { class: 'card panel', style: 'margin-top:20px;' }, [
+            Vue.h('h3', null, '用户列表'),
+            Vue.h('table', null, [
+              Vue.h('thead', null, Vue.h('tr', null, [
+                Vue.h('th', null, '用户 ID'),
+                Vue.h('th', null, 'Discord'),
+                Vue.h('th', null, '白名单'),
+                Vue.h('th', null, '操作')
+              ])),
+              Vue.h('tbody', null, users.value.map(u => Vue.h('tr', { key: u.newapi_user_id }, [
+                Vue.h('td', null, String(u.newapi_user_id)),
+                Vue.h('td', null, u.discord_name || u.discord_id || '-'),
+                Vue.h('td', null, u.is_whitelist ? '是' : '否'),
+                Vue.h('td', null, Vue.h('button', { class: 'btn secondary', onClick: () => toggleWhitelist(u.newapi_user_id, !u.is_whitelist) }, u.is_whitelist ? '移除' : '加入'))
+              ])))
+            ])
+          ]),
+          message.value ? Vue.h('div', { style: 'margin-top:12px; color:#93c5fd;' }, message.value) : null
+        ])
+      }
+    }
+    createApp(App).mount('#app')
+  </script>
+</body>
+</html>

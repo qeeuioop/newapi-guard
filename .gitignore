@@ -50,3 +50,6 @@ data/
 *.gz
 *.tgz
 *.rar
+
+# 文档类
+实施清单与Task.md
