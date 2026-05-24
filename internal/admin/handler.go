@@ -105,6 +105,13 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
+	token := r.Header.Get("Authorization")
+	if len(token) > 7 && token[:7] == "Bearer " {
+		token = token[7:]
+	} else {
+		token = ""
+	}
+	h.sessions.Delete(token)
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
@@ -145,7 +152,9 @@ func (h *Handler) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 			"checkin_quota":           h.settings.GetInt("checkin_quota", 500000),
 			"checkin_threshold":       h.settings.GetInt("checkin_threshold", 200000),
 			"newapi_base_url":         h.settings.GetString("newapi_base_url"),
+			"newapi_admin_token":      h.settings.GetString("newapi_admin_token"),
 			"public_base_url":         h.settings.GetString("public_base_url"),
+			"admin_password":          h.settings.GetString("admin_password"),
 			"oauth_client_id":         h.settings.GetString("oauth_client_id"),
 			"oauth_client_secret":     h.settings.GetString("oauth_client_secret"),
 			"oauth_provider_slug":     h.settings.GetString("oauth_provider_slug"),

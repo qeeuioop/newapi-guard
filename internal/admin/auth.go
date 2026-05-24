@@ -53,6 +53,15 @@ func (s *SessionStore) Validate(token string) bool {
 	return true
 }
 
+func (s *SessionStore) Delete(token string) {
+	if token == "" {
+		return
+	}
+	s.mu.Lock()
+	delete(s.sessions, token)
+	s.mu.Unlock()
+}
+
 func (s *SessionStore) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := r.Header.Get("Authorization")
