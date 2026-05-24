@@ -74,6 +74,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.isUserBanned(userID) {
+		h.writeAccessDenied(w, "账户已封禁")
+		return
+	}
+
 	if h.cache.IsWhitelist(userID) || h.loadWhitelist(userID) {
 		h.proxy.ServeHTTP(w, r)
 		return
@@ -89,12 +94,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	count := h.cache.IncrementRPM(key, time.Minute)
 	if count > limit {
 		h.bumpDailyStat("blocked_rpm")
-		webutil.WriteJSON(w, http.StatusTooManyRequests, map[string]any{
-			"error": map[string]any{
-				"message": fmt.Sprintf("Rate limit: %d requests/min", limit),
-				"type":    "rate_limit_error",
-			},
-		})
+		h.writeRateLimitError(w, fmt.Sprintf("请求过于频繁，请稍后再试（%d/%d 次/分钟）", count, limit))
 		return
 	}
 
@@ -155,21 +155,14 @@ func (h *Handler) handleUAViolation(w http.ResponseWriter, r *http.Request, user
 	max := h.settings.GetInt("ua_ban_strikes", 3)
 	h.bumpDailyStat("blocked_ua")
 	if count >= max {
-		_ = h.banUser(r.Context(), userID, "ua_violation", r.UserAgent(), r.RemoteAddr)
-		webutil.WriteJSON(w, http.StatusForbidden, map[string]any{
-			"error": map[string]any{
-				"message": "Account banned: unauthorized client",
-				"type":    "access_denied",
-			},
-		})
+		if err := h.banUser(r.Context(), userID, "ua_violation", r.UserAgent(), r.RemoteAddr); err != nil {
+			h.writeAccessDenied(w, fmt.Sprintf("未在特定客户端内使用，账号已封禁（%d/%d）", count, max))
+			return
+		}
+		h.writeAccessDenied(w, fmt.Sprintf("账户已封禁（未在特定客户端内使用，%d/%d）", count, max))
 		return
 	}
-	webutil.WriteJSON(w, http.StatusForbidden, map[string]any{
-		"error": map[string]any{
-			"message": fmt.Sprintf("Unauthorized client (%d/%d)", count, max),
-			"type":    "access_denied",
-		},
-	})
+	h.writeAccessDenied(w, fmt.Sprintf("未在特定客户端内使用（%d/%d）", count, max))
 }
 
 func (h *Handler) incrementUA(userID int64, ua string) int {
@@ -188,7 +181,9 @@ func (h *Handler) incrementUA(userID int64, ua string) int {
 func (h *Handler) banUser(ctx context.Context, userID int64, reason, ua, ip string) error {
 	adminToken := h.settings.GetString("newapi_admin_token")
 	if adminToken != "" {
-		_ = h.newapi.UpdateUserStatus(ctx, adminToken, userID, 2)
+		if err := h.newapi.UpdateUserStatus(ctx, adminToken, userID, 2); err != nil {
+			return err
+		}
 	}
 	var discordID sql.NullString
 	_ = h.db.QueryRow(`SELECT discord_id FROM users WHERE newapi_user_id=?`, userID).Scan(&discordID)
@@ -204,6 +199,35 @@ func (h *Handler) bumpDailyStat(field string) {
 	today := time.Now().Format("2006-01-02")
 	_, _ = h.db.Exec(`INSERT INTO daily_stats(date) VALUES(?) ON CONFLICT(date) DO NOTHING`, today)
 	_, _ = h.db.Exec(`UPDATE daily_stats SET `+field+` = `+field+` + 1 WHERE date=?`, today)
+}
+
+func (h *Handler) isUserBanned(userID int64) bool {
+	var marker int
+	err := h.db.QueryRow(`SELECT 1
+		FROM bans
+		WHERE newapi_user_id=?
+		  AND unbanned_at IS NULL
+		  AND (expire_at IS NULL OR expire_at > CURRENT_TIMESTAMP)
+		LIMIT 1`, userID).Scan(&marker)
+	return err == nil
+}
+
+func (h *Handler) writeAccessDenied(w http.ResponseWriter, message string) {
+	webutil.WriteJSON(w, http.StatusForbidden, map[string]any{
+		"error": map[string]any{
+			"message": message,
+			"type":    "access_denied",
+		},
+	})
+}
+
+func (h *Handler) writeRateLimitError(w http.ResponseWriter, message string) {
+	webutil.WriteJSON(w, http.StatusTooManyRequests, map[string]any{
+		"error": map[string]any{
+			"message": message,
+			"type":    "rate_limit_error",
+		},
+	})
 }
 
 func extractToken(r *http.Request) string {
