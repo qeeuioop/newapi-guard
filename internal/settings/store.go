@@ -17,10 +17,10 @@ type Store struct {
 var defaults = map[string]string{
 	"rpm_limit":               "3",
 	"ua_ban_strikes":          "3",
-	"allowed_ua":              `["FLClash/","ChatGPT-Next-Web/","NextChat/","LobeChat/","OpenCat/"]`,
 	"checkin_quota":           "500000",
 	"checkin_threshold":       "200000",
 	"newapi_base_url":         "http://new-api:3000",
+	"newapi_admin_user_id":    "",
 	"public_base_url":         "",
 	"oauth_client_id":         "",
 	"oauth_client_secret":     "",

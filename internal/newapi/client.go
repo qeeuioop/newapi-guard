@@ -13,9 +13,10 @@ import (
 )
 
 type Client struct {
-	mu      sync.RWMutex
-	baseURL string
-	http    *http.Client
+	mu          sync.RWMutex
+	baseURL     string
+	adminUserID string
+	http        *http.Client
 }
 
 func NewClient(baseURL string, timeout time.Duration) *Client {
@@ -33,10 +34,22 @@ func (c *Client) SetBaseURL(baseURL string) {
 	c.mu.Unlock()
 }
 
+func (c *Client) SetAdminUserID(userID string) {
+	c.mu.Lock()
+	c.adminUserID = strings.TrimSpace(userID)
+	c.mu.Unlock()
+}
+
 func (c *Client) BaseURL() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.baseURL
+}
+
+func (c *Client) adminUserIDValue() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.adminUserID
 }
 
 type UserSelf struct {
@@ -70,6 +83,7 @@ func (c *Client) SearchToken(ctx context.Context, adminToken, token string) (int
 		return 0, false, err
 	}
 	req.Header.Set("Authorization", "Bearer "+adminToken)
+	c.setAdminHeaders(req.Header)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -159,6 +173,7 @@ func (c *Client) TopupUser(ctx context.Context, adminToken string, userID int64,
 	}
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	req.Header.Set("Content-Type", "application/json")
+	c.setAdminHeaders(req.Header)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -182,6 +197,7 @@ func (c *Client) UpdateUserStatus(ctx context.Context, adminToken string, userID
 	}
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	req.Header.Set("Content-Type", "application/json")
+	c.setAdminHeaders(req.Header)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -206,6 +222,7 @@ func (c *Client) CreateUser(ctx context.Context, adminToken, username, password 
 	}
 	req.Header.Set("Authorization", "Bearer "+adminToken)
 	req.Header.Set("Content-Type", "application/json")
+	c.setAdminHeaders(req.Header)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -250,6 +267,7 @@ func (c *Client) ListUsers(ctx context.Context, adminToken string, page, pageSiz
 		return nil, 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+adminToken)
+	c.setAdminHeaders(req.Header)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -280,6 +298,7 @@ func (c *Client) GetUser(ctx context.Context, adminToken string, userID int64) (
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+adminToken)
+	c.setAdminHeaders(req.Header)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -310,6 +329,7 @@ func (c *Client) SearchUsers(ctx context.Context, adminToken, keyword string, pa
 		return nil, 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+adminToken)
+	c.setAdminHeaders(req.Header)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -339,6 +359,12 @@ func copyInterestingHeaders(dst, src http.Header) {
 		if value := src.Get(key); value != "" {
 			dst.Set(key, value)
 		}
+	}
+}
+
+func (c *Client) setAdminHeaders(headers http.Header) {
+	if userID := c.adminUserIDValue(); userID != "" {
+		headers.Set("New-Api-User", userID)
 	}
 }
 

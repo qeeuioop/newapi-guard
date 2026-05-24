@@ -201,7 +201,7 @@ Guard 仅记录封禁的上下文信息，实际封禁状态以 New API 的 `use
 |-----|-----------|------|
 | `rpm_limit` | `3` | 全局默认 RPM |
 | `ua_ban_strikes` | `3` | UA 违规封号次数 |
-| `allowed_ua` | `["FLClash/","ChatGPT-Next-Web/","NextChat/","LobeChat/","OpenCat/"]` | 允许的 UA 前缀列表 |
+| `allowed_ua` | `[]` | 允许的 UA 前缀列表（留空表示不启用） |
 | `checkin_quota` | `500000` | 每次签到获得的额度 |
 | `checkin_threshold` | `200000` | 余额低于此值才能签到 |
 | `oauth_client_id` | `""` | Guard 作为 OAuth Provider 暴露给 New API 的 client_id |
@@ -616,7 +616,7 @@ PUT /guard/api/settings
     {
       "rpm_limit": 3,
       "ua_ban_strikes": 3,
-      "allowed_ua": ["FLClash/", "NextChat/", ...],
+      "allowed_ua": [],
       "checkin_quota": 500000,
       "checkin_threshold": 200000,
       ...

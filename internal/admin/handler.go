@@ -153,6 +153,7 @@ func (h *Handler) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 			"checkin_threshold":       h.settings.GetInt("checkin_threshold", 200000),
 			"newapi_base_url":         h.settings.GetString("newapi_base_url"),
 			"newapi_admin_token":      h.settings.GetString("newapi_admin_token"),
+			"newapi_admin_user_id":    h.settings.GetString("newapi_admin_user_id"),
 			"public_base_url":         h.settings.GetString("public_base_url"),
 			"admin_password":          h.settings.GetString("admin_password"),
 			"oauth_client_id":         h.settings.GetString("oauth_client_id"),
@@ -192,6 +193,9 @@ func (h *Handler) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 	}
 	if newAPIURL, ok := updates["newapi_base_url"]; ok && strings.TrimSpace(newAPIURL) != "" {
 		h.newapi.SetBaseURL(newAPIURL)
+	}
+	if newAPIAdminUserID, ok := updates["newapi_admin_user_id"]; ok {
+		h.newapi.SetAdminUserID(newAPIAdminUserID)
 	}
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true})
 }

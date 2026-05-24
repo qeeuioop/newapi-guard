@@ -1,0 +1,84 @@
+services:
+  new-api:
+    image: ${NEWAPI_IMAGE:-calciumion/new-api:latest}
+    restart: unless-stopped
+    ports:
+      - "${NEWAPI_PORT:-3000}:3000"
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      NODE_NAME: ${NEWAPI_NODE_NAME:-new-api-node-1}
+    volumes:
+      - ./data/new-api:/data
+      - ./logs/new-api:/app/logs
+    # 如果你的 NewAPI 版本需要外部数据库或缓存，可以按需打开下面这些环境变量
+    # environment:
+    #   TZ: ${TZ:-Asia/Shanghai}
+    #   NODE_NAME: ${NEWAPI_NODE_NAME:-new-api-node-1}
+    #   SQL_DSN: postgresql://${POSTGRES_USER:-root}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-new-api}
+    #   REDIS_CONN_STRING: redis://:${REDIS_PASSWORD:-change-me}@redis:6379
+    networks:
+      - app-net
+
+  guard:
+    image: ${GUARD_IMAGE:-ghcr.io/your-name/newapi-guard:latest}
+    restart: unless-stopped
+    depends_on:
+      - new-api
+    ports:
+      - "${GUARD_PORT:-9000}:9000"
+    environment:
+      GUARD_LISTEN_ADDR: ${GUARD_LISTEN_ADDR:-:9000}
+      GUARD_DATA_DIR: ${GUARD_DATA_DIR:-/app/data}
+      GUARD_DB_PATH: ${GUARD_DB_PATH:-/app/data/guard.db}
+      GUARD_WEB_DIR: ${GUARD_WEB_DIR:-/app/web}
+      GUARD_ADMIN_PASSWORD: ${GUARD_ADMIN_PASSWORD:-change-me}
+      GUARD_NEWAPI_URL: ${GUARD_NEWAPI_URL:-http://new-api:3000}
+      GUARD_NEWAPI_ADMIN_TOKEN: ${GUARD_NEWAPI_ADMIN_TOKEN:-}
+      GUARD_SESSION_TTL: ${GUARD_SESSION_TTL:-24h}
+      GUARD_TOKEN_CACHE_TTL: ${GUARD_TOKEN_CACHE_TTL:-5m}
+      GUARD_ENABLE_SCHEDULER: ${GUARD_ENABLE_SCHEDULER:-true}
+    volumes:
+      - ./data/guard:/app/data
+    networks:
+      - app-net
+
+  # ------------------------------------------------------------------
+  # 以下两个服务是给 NewAPI 常见外部依赖预留的，不是 Guard 自己必须的组件
+  # 如果你的 NewAPI 部署方式需要 PostgreSQL / Redis，可以直接启用同编排通信
+  # 如果不需要，也可以删掉或保留但不接入
+  # ------------------------------------------------------------------
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      POSTGRES_USER: ${POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-new-api}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-root} -d ${POSTGRES_DB:-new-api}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app-net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-change-me}"]
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-change-me}", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    driver: bridge
