@@ -57,6 +57,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.withAuth(http.HandlerFunc(h.handleWhitelist)).ServeHTTP(w, r)
 	case strings.HasPrefix(r.URL.Path, "/guard/api/whitelist/"):
 		h.withAuth(http.HandlerFunc(h.handleWhitelistToggle)).ServeHTTP(w, r)
+	case r.URL.Path == "/guard/api/bans" && r.Method == http.MethodGet:
+		h.withAuth(http.HandlerFunc(h.handleBans)).ServeHTTP(w, r)
+	case r.URL.Path == "/guard/api/bans" && r.Method == http.MethodPost:
+		h.withAuth(http.HandlerFunc(h.handleCreateBan)).ServeHTTP(w, r)
+	case strings.HasPrefix(r.URL.Path, "/guard/api/bans/") && strings.HasSuffix(r.URL.Path, "/unban") && r.Method == http.MethodPost:
+		h.withAuth(http.HandlerFunc(h.handleUnban)).ServeHTTP(w, r)
+	case r.URL.Path == "/guard/api/logs/bans" && r.Method == http.MethodGet:
+		h.withAuth(http.HandlerFunc(h.handleBanLogs)).ServeHTTP(w, r)
+	case r.URL.Path == "/guard/api/logs/checkins" && r.Method == http.MethodGet:
+		h.withAuth(http.HandlerFunc(h.handleCheckinLogs)).ServeHTTP(w, r)
+	case r.URL.Path == "/guard/api/logs/stats" && r.Method == http.MethodGet:
+		h.withAuth(http.HandlerFunc(h.handleStatsLogs)).ServeHTTP(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -80,8 +92,8 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	token := h.sessions.Create()
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"token":   token,
+		"success":   true,
+		"token":     token,
 		"expire_in": int(h.sessions.ttl / time.Second),
 	})
 }
@@ -110,9 +122,9 @@ func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		Scan(&stats.TotalRequests, &stats.BlockedUA, &stats.BlockedRPM, &stats.Checkins, &stats.NewUsers, &stats.NewBans)
 
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{
-		"today":          stats,
-		"total_users":    totalUsers,
-		"active_bans":    activeBans,
+		"today":           stats,
+		"total_users":     totalUsers,
+		"active_bans":     activeBans,
 		"whitelist_count": whitelistCount,
 	})
 }
@@ -121,18 +133,24 @@ func (h *Handler) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 		"data": map[string]any{
-			"rpm_limit":            h.settings.GetInt("rpm_limit", 3),
-			"ua_ban_strikes":       h.settings.GetInt("ua_ban_strikes", 3),
-			"allowed_ua":           h.settings.GetStringSlice("allowed_ua"),
-			"checkin_quota":        h.settings.GetInt("checkin_quota", 500000),
-			"checkin_threshold":    h.settings.GetInt("checkin_threshold", 200000),
-			"oauth_client_id":      h.settings.GetString("oauth_client_id"),
-			"oauth_client_secret":   h.settings.GetString("oauth_client_secret"),
-			"oauth_provider_slug":   h.settings.GetString("oauth_provider_slug"),
-			"discord_client_id":     h.settings.GetString("discord_client_id"),
-			"discord_client_secret": h.settings.GetString("discord_client_secret"),
-			"discord_guild_id":      h.settings.GetString("discord_guild_id"),
-			"discord_access_policy": h.settings.GetString("discord_access_policy"),
+			"rpm_limit":               h.settings.GetInt("rpm_limit", 3),
+			"ua_ban_strikes":          h.settings.GetInt("ua_ban_strikes", 3),
+			"allowed_ua":              h.settings.GetStringSlice("allowed_ua"),
+			"checkin_quota":           h.settings.GetInt("checkin_quota", 500000),
+			"checkin_threshold":       h.settings.GetInt("checkin_threshold", 200000),
+			"newapi_base_url":         h.settings.GetString("newapi_base_url"),
+			"public_base_url":         h.settings.GetString("public_base_url"),
+			"oauth_client_id":         h.settings.GetString("oauth_client_id"),
+			"oauth_client_secret":     h.settings.GetString("oauth_client_secret"),
+			"oauth_provider_slug":     h.settings.GetString("oauth_provider_slug"),
+			"oauth_state_ttl_seconds": h.settings.GetInt("oauth_state_ttl_seconds", 300),
+			"oauth_code_ttl_seconds":  h.settings.GetInt("oauth_code_ttl_seconds", 120),
+			"oauth_token_ttl_seconds": h.settings.GetInt("oauth_token_ttl_seconds", 600),
+			"discord_client_id":       h.settings.GetString("discord_client_id"),
+			"discord_client_secret":   h.settings.GetString("discord_client_secret"),
+			"discord_guild_id":        h.settings.GetString("discord_guild_id"),
+			"discord_oauth_scopes":    h.settings.GetStringSlice("discord_oauth_scopes"),
+			"discord_access_policy":   h.settings.GetString("discord_access_policy"),
 		},
 	})
 }
@@ -156,6 +174,9 @@ func (h *Handler) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 	if err := h.settings.Update(updates); err != nil {
 		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if newAPIURL, ok := updates["newapi_base_url"]; ok && strings.TrimSpace(newAPIURL) != "" {
+		h.newapi.SetBaseURL(newAPIURL)
 	}
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true})
 }
@@ -262,4 +283,256 @@ func parseIntDefault(value string, fallback int) int {
 		return parsed
 	}
 	return fallback
+}
+
+func (h *Handler) createBan(r *http.Request, userID int64, reason, duration string) error {
+	adminToken := h.settings.GetString("newapi_admin_token")
+	if adminToken != "" {
+		if err := h.newapi.UpdateUserStatus(r.Context(), adminToken, userID, 2); err != nil {
+			return err
+		}
+	}
+
+	var discordID sql.NullString
+	_ = h.db.QueryRow(`SELECT discord_id FROM users WHERE newapi_user_id=?`, userID).Scan(&discordID)
+
+	var expireAt any
+	switch duration {
+	case "7d":
+		expireAt = time.Now().Add(7 * 24 * time.Hour).Format(time.RFC3339)
+	case "30d":
+		expireAt = time.Now().Add(30 * 24 * time.Hour).Format(time.RFC3339)
+	default:
+		duration = "permanent"
+		expireAt = nil
+	}
+
+	if _, err := h.db.Exec(`INSERT INTO bans(newapi_user_id, discord_id, reason, duration, expire_at, created_at)
+		VALUES(?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, userID, discordID.String, reason, duration, expireAt); err != nil {
+		return err
+	}
+
+	today := time.Now().Format("2006-01-02")
+	_, _ = h.db.Exec(`INSERT INTO daily_stats(date) VALUES(?) ON CONFLICT(date) DO NOTHING`, today)
+	_, _ = h.db.Exec(`UPDATE daily_stats SET new_bans = new_bans + 1 WHERE date=?`, today)
+	return nil
+}
+
+func (h *Handler) unbanByID(r *http.Request, banID int64) error {
+	var userID int64
+	if err := h.db.QueryRow(`SELECT newapi_user_id FROM bans WHERE id=?`, banID).Scan(&userID); err != nil {
+		return err
+	}
+	adminToken := h.settings.GetString("newapi_admin_token")
+	if adminToken != "" {
+		if err := h.newapi.UpdateUserStatus(r.Context(), adminToken, userID, 1); err != nil {
+			return err
+		}
+	}
+	if _, err := h.db.Exec(`UPDATE bans SET unbanned_at=CURRENT_TIMESTAMP WHERE id=?`, banID); err != nil {
+		return err
+	}
+	_, _ = h.db.Exec(`DELETE FROM ua_strikes WHERE newapi_user_id=?`, userID)
+	return nil
+}
+
+func (h *Handler) handleBans(w http.ResponseWriter, r *http.Request) {
+	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
+	if status == "" {
+		status = "active"
+	}
+
+	query := `SELECT id, newapi_user_id, discord_id, reason, violation_ua, client_ip, duration, expire_at, unbanned_at, created_at
+		FROM bans`
+	if status == "active" {
+		query += ` WHERE unbanned_at IS NULL AND (expire_at IS NULL OR expire_at > CURRENT_TIMESTAMP)`
+	}
+	query += ` ORDER BY created_at DESC`
+
+	rows, err := h.db.Query(query)
+	if err != nil {
+		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	var items []map[string]any
+	for rows.Next() {
+		var (
+			id          int64
+			userID      int64
+			discordID   sql.NullString
+			reason      string
+			violationUA sql.NullString
+			clientIP    sql.NullString
+			duration    string
+			expireAt    sql.NullString
+			unbannedAt  sql.NullString
+			createdAt   string
+		)
+		if err := rows.Scan(&id, &userID, &discordID, &reason, &violationUA, &clientIP, &duration, &expireAt, &unbannedAt, &createdAt); err != nil {
+			webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		items = append(items, map[string]any{
+			"id":             id,
+			"newapi_user_id": userID,
+			"discord_id":     discordID.String,
+			"reason":         reason,
+			"violation_ua":   violationUA.String,
+			"client_ip":      clientIP.String,
+			"duration":       duration,
+			"expire_at":      expireAt.String,
+			"unbanned_at":    unbannedAt.String,
+			"created_at":     createdAt,
+		})
+	}
+	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "items": items})
+}
+
+func (h *Handler) handleCreateBan(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID   int64  `json:"newapi_user_id"`
+		Reason   string `json:"reason"`
+		Duration string `json:"duration"`
+	}
+	if err := webutil.ReadJSON(r, &req); err != nil {
+		webutil.WriteError(w, http.StatusBadRequest, "请求体无效")
+		return
+	}
+	if req.UserID <= 0 || req.Reason == "" {
+		webutil.WriteError(w, http.StatusBadRequest, "参数不完整")
+		return
+	}
+	if req.Duration == "" {
+		req.Duration = "permanent"
+	}
+	if err := h.createBan(r, req.UserID, req.Reason, req.Duration); err != nil {
+		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (h *Handler) handleUnban(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/guard/api/bans/"), "/unban")
+	banID, err := strconv.ParseInt(strings.TrimSuffix(path, "/"), 10, 64)
+	if err != nil || banID <= 0 {
+		webutil.WriteError(w, http.StatusBadRequest, "封禁 ID 无效")
+		return
+	}
+	if err := h.unbanByID(r, banID); err != nil {
+		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (h *Handler) handleBanLogs(w http.ResponseWriter, r *http.Request) {
+	page := parseIntDefault(r.URL.Query().Get("page"), 1)
+	size := parseIntDefault(r.URL.Query().Get("size"), 50)
+	offset := (page - 1) * size
+	rows, err := h.db.Query(`SELECT id, newapi_user_id, discord_id, reason, violation_ua, client_ip, duration, expire_at, unbanned_at, created_at
+		FROM bans ORDER BY created_at DESC LIMIT ? OFFSET ?`, size, offset)
+	if err != nil {
+		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	items := []map[string]any{}
+	for rows.Next() {
+		var id, userID int64
+		var discordID sql.NullString
+		var reason, duration, createdAt string
+		var violationUA, clientIP, expireAt, unbannedAt sql.NullString
+		if err := rows.Scan(&id, &userID, &discordID, &reason, &violationUA, &clientIP, &duration, &expireAt, &unbannedAt, &createdAt); err != nil {
+			webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		items = append(items, map[string]any{
+			"id":             id,
+			"newapi_user_id": userID,
+			"discord_id":     discordID.String,
+			"reason":         reason,
+			"violation_ua":   violationUA.String,
+			"client_ip":      clientIP.String,
+			"duration":       duration,
+			"expire_at":      expireAt.String,
+			"unbanned_at":    unbannedAt.String,
+			"created_at":     createdAt,
+		})
+	}
+	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "page": page, "size": size, "items": items})
+}
+
+func (h *Handler) handleCheckinLogs(w http.ResponseWriter, r *http.Request) {
+	page := parseIntDefault(r.URL.Query().Get("page"), 1)
+	size := parseIntDefault(r.URL.Query().Get("size"), 50)
+	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+	offset := (page - 1) * size
+
+	query := `SELECT id, newapi_user_id, quota_added, checked_at FROM checkin_records`
+	args := []any{}
+	if userID != "" {
+		query += ` WHERE newapi_user_id=?`
+		args = append(args, userID)
+	}
+	query += ` ORDER BY checked_at DESC LIMIT ? OFFSET ?`
+	args = append(args, size, offset)
+
+	rows, err := h.db.Query(query, args...)
+	if err != nil {
+		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	items := []map[string]any{}
+	for rows.Next() {
+		var id, uid, quota int64
+		var checkedAt string
+		if err := rows.Scan(&id, &uid, &quota, &checkedAt); err != nil {
+			webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		items = append(items, map[string]any{
+			"id":             id,
+			"newapi_user_id": uid,
+			"quota_added":    quota,
+			"checked_at":     checkedAt,
+		})
+	}
+	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "page": page, "size": size, "items": items})
+}
+
+func (h *Handler) handleStatsLogs(w http.ResponseWriter, r *http.Request) {
+	days := parseIntDefault(r.URL.Query().Get("days"), 30)
+	rows, err := h.db.Query(`SELECT date, total_requests, blocked_ua, blocked_rpm, checkins, new_users, new_bans
+		FROM daily_stats ORDER BY date DESC LIMIT ?`, days)
+	if err != nil {
+		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	items := []map[string]any{}
+	for rows.Next() {
+		var date string
+		var total, ua, rpm, checkins, newUsers, newBans int
+		if err := rows.Scan(&date, &total, &ua, &rpm, &checkins, &newUsers, &newBans); err != nil {
+			webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		items = append(items, map[string]any{
+			"date":           date,
+			"total_requests": total,
+			"blocked_ua":     ua,
+			"blocked_rpm":    rpm,
+			"checkins":       checkins,
+			"new_users":      newUsers,
+			"new_bans":       newBans,
+		})
+	}
+	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "items": items})
 }

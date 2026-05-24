@@ -1,6 +1,8 @@
 package webutil
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -41,4 +43,10 @@ func CloneHeader(dst, src http.Header) {
 			dst.Add(key, value)
 		}
 	}
+}
+
+func RandomToken(length int) string {
+	raw := make([]byte, length)
+	_, _ = rand.Read(raw)
+	return hex.EncodeToString(raw)
 }

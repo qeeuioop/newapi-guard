@@ -44,9 +44,12 @@ func main() {
 	if env.NewAPIAdminToken != "" {
 		_ = systemSettings.Update(map[string]string{"newapi_admin_token": env.NewAPIAdminToken})
 	}
+	if env.NewAPIURL != "" {
+		_ = systemSettings.Update(map[string]string{"newapi_base_url": env.NewAPIURL})
+	}
 
 	runtimeCache := cache.New()
-	newAPIClient := newapi.NewClient(env.NewAPIURL, 30*time.Second)
+	newAPIClient := newapi.NewClient(systemSettings.GetString("newapi_base_url"), 30*time.Second)
 	adminSessions := admin.NewSessionStore(env.SessionTTL)
 
 	proxyHandler := proxy.NewHandler(env, db, systemSettings, runtimeCache, newAPIClient)

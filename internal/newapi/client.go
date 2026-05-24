@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Client struct {
+	mu      sync.RWMutex
 	baseURL string
 	http    *http.Client
 }
@@ -25,13 +27,25 @@ func NewClient(baseURL string, timeout time.Duration) *Client {
 	}
 }
 
+func (c *Client) SetBaseURL(baseURL string) {
+	c.mu.Lock()
+	c.baseURL = strings.TrimRight(baseURL, "/")
+	c.mu.Unlock()
+}
+
+func (c *Client) BaseURL() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.baseURL
+}
+
 type UserSelf struct {
 	UserID int64 `json:"user_id"`
 	Quota  int   `json:"quota"`
 }
 
 func (c *Client) SearchToken(ctx context.Context, adminToken, token string) (int64, bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/token/search?keyword="+urlQueryEscape(token), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL()+"/api/token/search?keyword="+urlQueryEscape(token), nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -74,7 +88,7 @@ func (c *Client) SearchToken(ctx context.Context, adminToken, token string) (int
 }
 
 func (c *Client) GetUserSelf(ctx context.Context, headers http.Header) (*UserSelf, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/user/self", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL()+"/api/user/self", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +133,7 @@ func (c *Client) TopupUser(ctx context.Context, adminToken string, userID int64,
 		"user_id": userID,
 		"quota":   quota,
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/user/topup/complete", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL()+"/api/user/topup/complete", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -142,7 +156,7 @@ func (c *Client) UpdateUserStatus(ctx context.Context, adminToken string, userID
 		"id":     userID,
 		"status": status,
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+"/api/user/", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.BaseURL()+"/api/user/", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -165,7 +179,7 @@ func (c *Client) CreateUser(ctx context.Context, adminToken, username, password 
 		"username": username,
 		"password": password,
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/user/", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL()+"/api/user/", bytes.NewReader(body))
 	if err != nil {
 		return 0, err
 	}

@@ -27,13 +27,16 @@ type Handler struct {
 }
 
 func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cacheStore *cache.Store, newapiClient *newapi.Client) *Handler {
-	target, _ := url.Parse(strings.TrimRight(env.NewAPIURL, "/"))
-	rp := httputil.NewSingleHostReverseProxy(target)
+	rp := &httputil.ReverseProxy{}
 	rp.FlushInterval = -1
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		webutil.WriteError(w, http.StatusBadGateway, "上游服务不可用")
 	}
 	rp.Director = func(r *http.Request) {
+		target, err := url.Parse(strings.TrimRight(newapiClient.BaseURL(), "/"))
+		if err != nil {
+			return
+		}
 		r.URL.Scheme = target.Scheme
 		r.URL.Host = target.Host
 		r.URL.Path = singleJoin(target.Path, "/v1"+r.URL.Path)

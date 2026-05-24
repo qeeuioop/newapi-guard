@@ -79,11 +79,28 @@ func Migrate(db *sql.DB) error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
 			code TEXT PRIMARY KEY,
+			client_id TEXT NOT NULL,
+			redirect_uri TEXT NOT NULL,
 			discord_id TEXT NOT NULL,
 			discord_name TEXT,
 			payload TEXT NOT NULL,
 			expire_at DATETIME NOT NULL,
 			used_at DATETIME,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS oauth_pending_states (
+			state TEXT PRIMARY KEY,
+			client_id TEXT NOT NULL,
+			redirect_uri TEXT NOT NULL,
+			original_state TEXT NOT NULL,
+			scope TEXT,
+			expire_at DATETIME NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS oauth_access_tokens (
+			access_token TEXT PRIMARY KEY,
+			payload TEXT NOT NULL,
+			expire_at DATETIME NOT NULL,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);`,
 		`CREATE TABLE IF NOT EXISTS config (
@@ -106,5 +123,39 @@ func Migrate(db *sql.DB) error {
 			return err
 		}
 	}
+
+	if err := ensureColumn(db, "oauth_authorization_codes", "client_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := ensureColumn(db, "oauth_authorization_codes", "redirect_uri", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	return nil
+}
+
+func ensureColumn(db *sql.DB, table, column, def string) error {
+	rows, err := db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			colType   string
+			notnull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &colType, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, def))
+	return err
 }

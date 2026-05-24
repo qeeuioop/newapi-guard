@@ -7,7 +7,6 @@ import (
 	"newapiguard/internal/config"
 	"newapiguard/internal/newapi"
 	"newapiguard/internal/settings"
-	"newapiguard/internal/webutil"
 )
 
 type Handler struct {
@@ -29,11 +28,17 @@ func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, newap
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/guard/oauth/authorize":
-		webutil.WriteError(w, http.StatusNotImplemented, "Discord OAuth 尚未接入完成")
+		if r.URL.Query().Get("state") != "" && r.URL.Query().Get("code") != "" && r.URL.Query().Get("client_id") == "" {
+			h.handleDiscordCallback(w, r)
+			return
+		}
+		h.handleAuthorize(w, r)
+	case "/guard/oauth/callback/discord":
+		h.handleDiscordCallback(w, r)
 	case "/guard/oauth/token":
-		webutil.WriteError(w, http.StatusNotImplemented, "Discord OAuth 尚未接入完成")
+		h.handleToken(w, r)
 	case "/guard/oauth/userinfo":
-		webutil.WriteError(w, http.StatusNotImplemented, "Discord OAuth 尚未接入完成")
+		h.handleUserinfo(w, r)
 	default:
 		http.NotFound(w, r)
 	}

@@ -21,6 +21,7 @@ func Start(ctx context.Context, db *sql.DB, settingsStore *settings.Store, runti
 			case <-ticker.C:
 				runtimeCache.Cleanup()
 				cleanupExpiredBans(db, settingsStore, client)
+				cleanupExpiredOAuth(db)
 			}
 		}
 	}()
@@ -45,4 +46,10 @@ func cleanupExpiredBans(db *sql.DB, settingsStore *settings.Store, client *newap
 		_, _ = db.Exec(`UPDATE bans SET unbanned_at=CURRENT_TIMESTAMP WHERE id=?`, banID)
 		_, _ = db.Exec(`DELETE FROM ua_strikes WHERE newapi_user_id=?`, userID)
 	}
+}
+
+func cleanupExpiredOAuth(db *sql.DB) {
+	_, _ = db.Exec(`DELETE FROM oauth_pending_states WHERE expire_at <= CURRENT_TIMESTAMP`)
+	_, _ = db.Exec(`DELETE FROM oauth_authorization_codes WHERE expire_at <= CURRENT_TIMESTAMP OR used_at IS NOT NULL`)
+	_, _ = db.Exec(`DELETE FROM oauth_access_tokens WHERE expire_at <= CURRENT_TIMESTAMP`)
 }

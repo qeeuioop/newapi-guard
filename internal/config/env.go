@@ -7,23 +7,23 @@ import (
 )
 
 type Env struct {
-	ListenAddr      string
-	NewAPIURL       string
-	DataDir         string
-	DBPath          string
-	WebDir          string
-	AdminPassword   string
+	ListenAddr       string
+	NewAPIURL        string
+	DataDir          string
+	DBPath           string
+	WebDir           string
+	AdminPassword    string
 	NewAPIAdminToken string
-	SessionTTL      time.Duration
-	TokenCacheTTL   time.Duration
-	EnableScheduler bool
+	SessionTTL       time.Duration
+	TokenCacheTTL    time.Duration
+	EnableScheduler  bool
 }
 
 func LoadEnv() Env {
 	dataDir := getEnv("GUARD_DATA_DIR", "./data")
 	return Env{
 		ListenAddr:       getEnv("GUARD_LISTEN_ADDR", ":9000"),
-		NewAPIURL:        getEnv("GUARD_NEWAPI_URL", "http://new-api:3000"),
+		NewAPIURL:        getEnv("GUARD_NEWAPI_URL", ""),
 		DataDir:          dataDir,
 		DBPath:           getEnv("GUARD_DB_PATH", dataDir+"/guard.db"),
 		WebDir:           getEnv("GUARD_WEB_DIR", "./web"),
