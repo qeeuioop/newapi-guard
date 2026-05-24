@@ -44,6 +44,26 @@ type UserSelf struct {
 	Quota  int   `json:"quota"`
 }
 
+type User struct {
+	ID          int64  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Status      int    `json:"status"`
+	Quota       int    `json:"quota"`
+	Role        int    `json:"role"`
+	Group       string `json:"group"`
+	Email       string `json:"email"`
+	CreatedAt   int64  `json:"created_at"`
+	LastLoginAt int64  `json:"last_login_at"`
+}
+
+type UserPage struct {
+	Page     int    `json:"page"`
+	PageSize int    `json:"page_size"`
+	Total    int    `json:"total"`
+	Items    []User `json:"items"`
+}
+
 func (c *Client) SearchToken(ctx context.Context, adminToken, token string) (int64, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL()+"/api/token/search?keyword="+urlQueryEscape(token), nil)
 	if err != nil {
@@ -178,6 +198,7 @@ func (c *Client) CreateUser(ctx context.Context, adminToken, username, password 
 	body, _ := json.Marshal(map[string]any{
 		"username": username,
 		"password": password,
+		"role":     1,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL()+"/api/user/", bytes.NewReader(body))
 	if err != nil {
@@ -211,7 +232,106 @@ func (c *Client) CreateUser(ctx context.Context, adminToken, username, password 
 			}
 		}
 	}
-	return 0, fmt.Errorf("未返回 user_id")
+	users, _, err := c.SearchUsers(ctx, adminToken, username, 1, 20)
+	if err != nil {
+		return 0, err
+	}
+	for _, user := range users {
+		if user.Username == username {
+			return user.ID, nil
+		}
+	}
+	return 0, fmt.Errorf("创建成功但未定位到 user_id")
+}
+
+func (c *Client) ListUsers(ctx context.Context, adminToken string, page, pageSize int) ([]User, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/user/?p=%d&page_size=%d", c.BaseURL(), page, pageSize), nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, 0, fmt.Errorf("获取用户列表失败: %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Success bool     `json:"success"`
+		Message string   `json:"message"`
+		Data    UserPage `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, 0, err
+	}
+	if !payload.Success {
+		return nil, 0, fmt.Errorf("获取用户列表失败: %s", payload.Message)
+	}
+	return payload.Data.Items, payload.Data.Total, nil
+}
+
+func (c *Client) GetUser(ctx context.Context, adminToken string, userID int64) (*User, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/user/%d", c.BaseURL(), userID), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("获取用户详情失败: %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    User   `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if !payload.Success {
+		return nil, fmt.Errorf("获取用户详情失败: %s", payload.Message)
+	}
+	return &payload.Data, nil
+}
+
+func (c *Client) SearchUsers(ctx context.Context, adminToken, keyword string, page, pageSize int) ([]User, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/user/search?keyword=%s&p=%d&page_size=%d", c.BaseURL(), urlQueryEscape(keyword), page, pageSize), nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, 0, fmt.Errorf("搜索用户失败: %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Success bool     `json:"success"`
+		Message string   `json:"message"`
+		Data    UserPage `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, 0, err
+	}
+	if !payload.Success {
+		return nil, 0, fmt.Errorf("搜索用户失败: %s", payload.Message)
+	}
+	return payload.Data.Items, payload.Data.Total, nil
 }
 
 func copyInterestingHeaders(dst, src http.Header) {
