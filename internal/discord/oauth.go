@@ -29,6 +29,7 @@ type discordUser struct {
 
 type discordGuildMember struct {
 	GuildID string
+	Nick    string      `json:"nick"`
 	User    discordUser `json:"user"`
 	Roles   []string    `json:"roles"`
 }
@@ -37,6 +38,7 @@ type oauthPayload struct {
 	Sub           string `json:"sub"`
 	PreferredName string `json:"preferred_username"`
 	Name          string `json:"name"`
+	DisplayName   string `json:"display_name"`
 	Email         string `json:"email"`
 }
 
@@ -147,10 +149,12 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	displayName := displayName(member, upstreamUser)
 	payload := oauthPayload{
 		Sub:           "discord:" + upstreamUser.ID,
-		PreferredName: username(upstreamUser),
-		Name:          displayName(upstreamUser),
+		PreferredName: oauthUsername(upstreamUser),
+		Name:          displayName,
+		DisplayName:   displayName,
 		Email:         "",
 	}
 	code := webutil.RandomToken(24)
@@ -249,6 +253,7 @@ func (h *Handler) handleUserinfo(w http.ResponseWriter, r *http.Request) {
 		"sub":                payload.Sub,
 		"preferred_username": payload.PreferredName,
 		"name":               payload.Name,
+		"display_name":       payload.DisplayName,
 		"email":              payload.Email,
 	})
 }
@@ -440,14 +445,20 @@ func (h *Handler) redirectError(w http.ResponseWriter, r *http.Request, redirect
 	})
 }
 
-func username(user *discordUser) string {
-	if user.Username != "" {
+func oauthUsername(user *discordUser) string {
+	if strings.TrimSpace(user.Username) != "" {
 		return user.Username
 	}
 	return "dc_" + user.ID
 }
 
-func displayName(user *discordUser) string {
+func displayName(member *discordGuildMember, user *discordUser) string {
+	if member != nil && strings.TrimSpace(member.Nick) != "" {
+		return member.Nick
+	}
+	if user == nil {
+		return ""
+	}
 	if user.GlobalName != "" {
 		return user.GlobalName
 	}

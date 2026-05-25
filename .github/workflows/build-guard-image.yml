@@ -1,17 +1,9 @@
-name: 手动构建 Guard 镜像
+name: 自动构建 Guard 镜像
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 镜像标签
-        required: true
-        default: latest
-      push_latest:
-        description: 同时推送 latest
-        required: true
-        type: boolean
-        default: true
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -40,8 +32,8 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/newapi-guard
           tags: |
-            type=raw,value=${{ inputs.tag }}
-            type=raw,value=latest,enable=${{ inputs.push_latest }}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: 构建并推送镜像
         uses: docker/build-push-action@v6
