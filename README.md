@@ -268,6 +268,100 @@ http://localhost:9000/guard/admin/
 3. 再到 NewAPI 管理后台里创建自定义 OAuth Provider
 4. 把 `authorize / token / userinfo` 三个地址指向 Guard
 
+### 反向代理与回调地址必读
+
+这一段如果没配严谨，最容易出现下面这类现象：
+
+- 身份组验证成功，但又跳回 NewAPI 登录页
+- NewAPI 回调页提示“获取 token 失败”
+- 同一个人有时能登录，有时失败
+
+这类问题通常不是项目逻辑本身有错，而是 **反向代理、域名、协议或回调地址不完全一致**。
+
+请务必满足下面这些条件：
+
+1. `public_base_url` 必须固定为用户实际访问的唯一外网地址  
+   例如：`https://api.example.com`
+2. Discord 开发者后台的 Redirect URL 必须精确配置为  
+   `https://api.example.com/guard/oauth/callback/discord`
+3. NewAPI 自定义 OAuth Provider 的回调链路实际会使用  
+   `https://api.example.com/oauth/guard-discord`
+4. 登录时不要混用多个入口  
+   例如不要一会儿用域名、一会儿用 IP、一会儿用另一个二级域名
+5. 所有涉及 OAuth 的地址必须保持同一协议  
+   不要前面用 `https`，后面某一步又变成 `http`
+
+换句话说，下面这几项必须是“同一个外网域名体系”：
+
+- Guard 设置里的 `public_base_url`
+- Discord OAuth 回调地址
+- 用户实际打开的 NewAPI 登录页域名
+- NewAPI 自定义 OAuth Provider 里填写的 Guard 端点
+
+### Nginx / OpenResty 最低要求
+
+如果你前面有 Nginx、OpenResty、1Panel 反代，至少要传这些头：
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Real-IP $remote_addr;
+```
+
+如果缺少 `Host` 或 `X-Forwarded-Proto`，Guard 在某些场景下可能推断出错误的外部地址，进而导致 OAuth 回调或 token 交换不稳定。
+
+### 推荐的反向代理示例
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name api.example.com;
+
+    location /v1/ {
+        proxy_pass http://guard:9000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_buffering off;
+    }
+
+    location = /api/user/checkin {
+        proxy_pass http://guard:9000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /guard/ {
+        proxy_pass http://guard:9000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location / {
+        proxy_pass http://new-api:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+### 现象和排查方向
+
+- Guard 页面显示“身份组验证成功，登录成功”，但 NewAPI 又提示“获取 token 失败”  
+  这通常说明 Discord 和 Guard 校验都已经通过，问题多半在 `/guard/oauth/token` 这一步的 `client_id`、`client_secret`、`redirect_uri` 或域名不一致。
+- Guard 页面显示“无要求身份组，登录失败”  
+  说明已经成功拿到 Discord 用户与服务器成员信息，但没有命中配置的身份组规则。
+- 偶发成功、偶发失败  
+  优先检查是否混用了多个登录入口，或反代对协议/主机名的透传不稳定。
+
 ## 数据目录
 
 当前 Compose 模板会在项目根目录下生成以下数据目录：

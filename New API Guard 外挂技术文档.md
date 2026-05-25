@@ -81,6 +81,8 @@ server {
     # API 请求 → Guard 透明代理
     location /v1/ {
         proxy_pass http://guard:9000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_buffering off;  # 不缓冲，支持 SSE 流式透传
@@ -89,22 +91,37 @@ server {
     # 签到拦截 → Guard
     location = /api/user/checkin {
         proxy_pass http://guard:9000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
     # Guard 管理面板 + OAuth Provider + 可选静态资源
     location /guard/ {
         proxy_pass http://guard:9000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 
     # 其余所有 → New API 原版
     location / {
         proxy_pass http://new-api:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 }
 ```
 
-**关键点：** `proxy_buffering off` 确保 `/v1/chat/completions` 等流式 SSE 响应直接透传到用户，Guard 不缓冲不处理流内容。
+**关键点：**
+
+- `proxy_buffering off` 确保 `/v1/chat/completions` 等流式 SSE 响应直接透传到用户，Guard 不缓冲不处理流内容。
+- `Host` 与 `X-Forwarded-Proto` 必须透传，否则 Guard 在 OAuth 流程里推断外部地址时可能得到错误的协议或主机名。
+- 对外只应保留一个正式访问域名，不要混用域名、IP、备用二级域名，否则 OAuth 的 `redirect_uri` 很容易出现偶发不一致。
 
 ---
 
@@ -314,6 +331,7 @@ GET  /guard/oauth/userinfo
 - 推荐使用 **New API 的 custom oauth provider** 接入 Guard，不依赖 New API 内置 `discord_oauth`
 - New API 管理面板中可开启内置 `discord_oauth`，但它不参与 Guard 的准入校验主流程
 - 自定义 Provider 配置完成后，New API 登录页会自动显示按钮，**默认不需要 JS 注入**
+- `client_id`、`client_secret`、`authorization_endpoint`、`token_endpoint`、`user_info_endpoint` 建议全部填写为同一正式 HTTPS 域名下的地址，不要混用 IP 或内网地址
 
 ### 4.3 登录与跳转流程
 
@@ -386,6 +404,27 @@ GET  /guard/oauth/userinfo
   → 登录成功后，New API 调用 setupLogin 写入 session
   → 前端随后调用 /api/user/self，进入已登录状态
 ```
+
+### 4.3.1 部署时必须满足的“完全一致”
+
+下面几项如果不完全一致，就可能出现“身份组验证成功，但回到 NewAPI 登录页”或“获取 token 失败”：
+
+1. Guard 设置中的 `public_base_url`
+2. 用户实际访问 NewAPI 登录页时看到的外网域名
+3. Discord 开发者后台登记的 Redirect URL  
+   `https://你的newapi域名/guard/oauth/callback/discord`
+4. NewAPI 在 OAuth 流程中使用的回调地址  
+   `https://你的newapi域名/oauth/guard-discord`
+5. NewAPI 自定义 OAuth Provider 中配置的 Guard 三个端点
+
+注意事项：
+
+- 协议必须一致：前后都应是 `https`
+- 主机名必须一致：不要一部分请求走域名，另一部分走 IP
+- 路径必须一致：不要一个地址带尾部斜杠、另一个不带
+- 同一用户登录时不要反复点击按钮，否则旧 `code` 可能被覆盖或提前失效
+
+这类问题往往不是 Discord 身份组判断错误，而是 OAuth 后半段的 `redirect_uri`、`code` 或客户端凭据校验失败。
 
 ### 4.4 会话机制说明
 
