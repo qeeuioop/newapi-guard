@@ -3,6 +3,7 @@ package discord
 import (
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"net/url"
@@ -101,14 +102,26 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 	discordCode := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
 	if discordCode == "" || state == "" {
-		webutil.WriteError(w, http.StatusBadRequest, "参数无效")
+		h.renderCallbackResult(w, r, callbackResultPage{
+			Title:       "登录失败",
+			Message:     "登录参数无效，无法继续。",
+			Description: "缺少 code 或 state 参数。",
+			RedirectURL: h.publicBaseURL(r),
+			Success:     false,
+		})
 		return
 	}
 
 	var redirectURI, originalState string
 	if err := h.db.QueryRow(`SELECT redirect_uri, original_state FROM oauth_pending_states WHERE state=? AND expire_at > CURRENT_TIMESTAMP`, state).
 		Scan(&redirectURI, &originalState); err != nil {
-		webutil.WriteError(w, http.StatusBadRequest, "state 无效或已过期")
+		h.renderCallbackResult(w, r, callbackResultPage{
+			Title:       "登录失败",
+			Message:     "登录状态已失效，请重新发起登录。",
+			Description: "state 无效或已过期。",
+			RedirectURL: h.publicBaseURL(r),
+			Success:     false,
+		})
 		return
 	}
 
@@ -153,7 +166,13 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 	values := url.Values{}
 	values.Set("code", code)
 	values.Set("state", originalState)
-	http.Redirect(w, r, redirectURI+"?"+values.Encode(), http.StatusFound)
+	h.renderCallbackResult(w, r, callbackResultPage{
+		Title:       "登录成功",
+		Message:     "身份组验证成功，登录成功",
+		Description: "3 秒后将继续跳转并完成 NewAPI 登录。",
+		RedirectURL: redirectURI + "?" + values.Encode(),
+		Success:     true,
+	})
 }
 
 func (h *Handler) handleToken(w http.ResponseWriter, r *http.Request) {
@@ -320,7 +339,7 @@ func (h *Handler) isAllowed(member *discordGuildMember) (bool, string) {
 	if evaluatePolicy(policy, member) {
 		return true, ""
 	}
-	return false, "不满足准入规则"
+	return false, "无要求身份组，登录失败"
 }
 
 func evaluatePolicy(policy accessPolicy, member *discordGuildMember) bool {
@@ -389,17 +408,27 @@ func (h *Handler) publicBaseURL(r *http.Request) string {
 }
 
 func (h *Handler) redirectError(w http.ResponseWriter, r *http.Request, redirectURI, originalState, code, description string) {
-	if redirectURI == "" {
-		webutil.WriteError(w, http.StatusForbidden, description)
-		return
-	}
 	values := url.Values{}
 	values.Set("error", code)
 	if description != "" {
 		values.Set("error_description", description)
 	}
 	values.Set("state", originalState)
-	http.Redirect(w, r, redirectURI+"?"+values.Encode(), http.StatusFound)
+	target := h.publicBaseURL(r)
+	if redirectURI != "" {
+		target = redirectURI + "?" + values.Encode()
+	}
+	message := "Discord 登录失败"
+	if description == "无要求身份组，登录失败" {
+		message = description
+	}
+	h.renderCallbackResult(w, r, callbackResultPage{
+		Title:       "登录失败",
+		Message:     message,
+		Description: fallbackString(description, "3 秒后将返回登录页。"),
+		RedirectURL: target,
+		Success:     false,
+	})
 }
 
 func displayName(user *discordUser) string {
@@ -413,4 +442,157 @@ func displayName(user *discordUser) string {
 		return user.Username
 	}
 	return user.ID
+}
+
+type callbackResultPage struct {
+	Title       string
+	Message     string
+	Description string
+	RedirectURL string
+	Success     bool
+}
+
+func (h *Handler) renderCallbackResult(w http.ResponseWriter, r *http.Request, page callbackResultPage) {
+	if strings.TrimSpace(page.RedirectURL) == "" {
+		page.RedirectURL = h.publicBaseURL(r)
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+
+	const tpl = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ .Title }}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: rgba(255, 250, 242, 0.92);
+      --text: #1f2937;
+      --muted: #6b7280;
+      --success: #1d6b4f;
+      --error: #9f1239;
+      --accent: #c26d2d;
+      --border: rgba(31, 41, 55, 0.12);
+      --shadow: 0 30px 80px rgba(31, 41, 55, 0.16);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(194, 109, 45, 0.22), transparent 34%),
+        radial-gradient(circle at bottom right, rgba(34, 197, 94, 0.18), transparent 30%),
+        linear-gradient(135deg, #fcfaf6 0%, #efe6d7 100%);
+    }
+    .panel {
+      width: min(560px, 100%);
+      padding: 36px 30px;
+      border-radius: 28px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      background: {{ if .Success }}rgba(29, 107, 79, 0.12){{ else }}rgba(159, 18, 57, 0.12){{ end }};
+      color: {{ if .Success }}var(--success){{ else }}var(--error){{ end }};
+    }
+    h1 {
+      margin: 18px 0 12px;
+      font-size: clamp(28px, 4vw, 38px);
+      line-height: 1.18;
+    }
+    p {
+      margin: 0;
+      line-height: 1.75;
+      font-size: 15px;
+      color: var(--muted);
+    }
+    .countdown {
+      margin-top: 24px;
+      padding: 18px 20px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.72);
+      border: 1px solid rgba(31, 41, 55, 0.08);
+      font-size: 15px;
+    }
+    .countdown strong {
+      color: var(--accent);
+      font-size: 24px;
+      padding: 0 2px;
+    }
+    .link {
+      margin-top: 18px;
+      display: inline-block;
+      color: var(--text);
+    }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <div class="badge">{{ if .Success }}验证通过{{ else }}验证失败{{ end }}</div>
+    <h1>{{ .Message }}</h1>
+    <p>{{ .Description }}</p>
+    <div class="countdown">页面将在 <strong id="countdown">3</strong> 秒后自动跳转。</div>
+    <a class="link" href="{{ .RedirectURL }}">如果没有自动跳转，请点这里继续</a>
+  </main>
+  <script>
+    const redirectURL = {{ .RedirectURLJSON }};
+    const countdownNode = document.getElementById("countdown");
+    let seconds = 3;
+    const timer = window.setInterval(() => {
+      seconds -= 1;
+      if (seconds <= 0) {
+        window.clearInterval(timer);
+        window.location.href = redirectURL;
+        return;
+      }
+      countdownNode.textContent = String(seconds);
+    }, 1000);
+  </script>
+</body>
+</html>`
+
+	redirectURLJSON, _ := json.Marshal(page.RedirectURL)
+	data := struct {
+		Title           string
+		Message         string
+		Description     string
+		RedirectURL     string
+		RedirectURLJSON template.JS
+		Success         bool
+	}{
+		Title:           page.Title,
+		Message:         page.Message,
+		Description:     page.Description,
+		RedirectURL:     page.RedirectURL,
+		RedirectURLJSON: template.JS(redirectURLJSON),
+		Success:         page.Success,
+	}
+
+	_ = template.Must(template.New("callback-result").Parse(tpl)).Execute(w, data)
+}
+
+func fallbackString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
