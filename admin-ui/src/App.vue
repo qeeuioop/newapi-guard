@@ -293,7 +293,7 @@
                             </td>
                             <td>
                               <div class="cell-stack">
-                                <div class="cell-title">{{ formatNumber(item.quota) }}</div>
+                                <div class="cell-title">{{ formatQuotaUSD(item.quota) }}</div>
                                 <div class="cell-sub">状态：{{ item.status === 2 ? "已封禁" : "正常" }}</div>
                                 <div class="cell-sub">创建：{{ parseDate(item.created_at || item.created_at_unix) }}</div>
                               </div>
@@ -1175,6 +1175,16 @@ function parseDate(value) {
 
 function formatNumber(value) {
   return new Intl.NumberFormat("zh-CN").format(Number(value || 0));
+}
+
+function formatQuotaUSD(value) {
+  const amount = Number(value || 0) / 500000;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2
+  }).format(amount);
 }
 
 function formatMaybeArray(value) {

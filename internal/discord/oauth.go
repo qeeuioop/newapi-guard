@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -141,13 +142,14 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if ok, reason := h.isAllowed(member); !ok {
+		log.Printf("Guard OAuth access denied: discord_id=%s guild_id=%s roles=%v reason=%s", upstreamUser.ID, member.GuildID, member.Roles, reason)
 		h.redirectError(w, r, redirectURI, originalState, "access_denied", reason)
 		return
 	}
 
 	payload := oauthPayload{
 		Sub:           "discord:" + upstreamUser.ID,
-		PreferredName: "dc_" + upstreamUser.ID,
+		PreferredName: username(upstreamUser),
 		Name:          displayName(upstreamUser),
 		Email:         "",
 	}
@@ -184,7 +186,13 @@ func (h *Handler) handleToken(w http.ResponseWriter, r *http.Request) {
 		webutil.WriteError(w, http.StatusBadRequest, "grant_type 无效")
 		return
 	}
-	if r.PostForm.Get("client_id") != h.settings.GetString("oauth_client_id") || r.PostForm.Get("client_secret") != h.settings.GetString("oauth_client_secret") {
+	clientID := r.PostForm.Get("client_id")
+	clientSecret := r.PostForm.Get("client_secret")
+	if basicID, basicSecret, ok := r.BasicAuth(); ok {
+		clientID = basicID
+		clientSecret = basicSecret
+	}
+	if clientID != h.settings.GetString("oauth_client_id") || clientSecret != h.settings.GetString("oauth_client_secret") {
 		webutil.WriteError(w, http.StatusUnauthorized, "客户端凭据无效")
 		return
 	}
@@ -200,7 +208,7 @@ func (h *Handler) handleToken(w http.ResponseWriter, r *http.Request) {
 		webutil.WriteError(w, http.StatusBadRequest, "code 无效或已过期")
 		return
 	}
-	if storedClientID != r.PostForm.Get("client_id") || storedRedirectURI != r.PostForm.Get("redirect_uri") {
+	if storedClientID != clientID || storedRedirectURI != r.PostForm.Get("redirect_uri") {
 		webutil.WriteError(w, http.StatusBadRequest, "redirect_uri 或 client_id 不匹配")
 		return
 	}
@@ -266,6 +274,7 @@ func (h *Handler) exchangeDiscordToken(r *http.Request, code string) (string, er
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
+		log.Printf("Discord token exchange failed: status=%d redirect_uri=%s body=%s", resp.StatusCode, form.Get("redirect_uri"), strings.TrimSpace(string(body)))
 		return "", fmt.Errorf("Discord token 交换失败: %s", strings.TrimSpace(string(body)))
 	}
 	var payload struct {
@@ -429,6 +438,13 @@ func (h *Handler) redirectError(w http.ResponseWriter, r *http.Request, redirect
 		RedirectURL: target,
 		Success:     false,
 	})
+}
+
+func username(user *discordUser) string {
+	if user.Username != "" {
+		return user.Username
+	}
+	return "dc_" + user.ID
 }
 
 func displayName(user *discordUser) string {
