@@ -76,7 +76,30 @@ NewAPI
 - `GUARD_NEWAPI_URL`
   Guard 访问 NewAPI 的内网地址
 - `GUARD_NEWAPI_ADMIN_TOKEN`
-  NewAPI 管理员令牌
+  NewAPI 管理员令牌（详见下方说明）
+
+### `GUARD_NEWAPI_ADMIN_TOKEN` 获取方式
+
+> **注意**：这个值**不是** NewAPI 前端创建的 API Key（`sk-xxx`）。  
+> API Key 只能调用 `/v1/*` 类 OpenAI 兼容接口，无法调用 `/api/*` 管理接口。  
+> Guard 需要的是 NewAPI `users` 表中管理员用户的 `access_token` 字段值。
+
+获取步骤：
+
+1. 完成 NewAPI 初始化（创建管理员账号）
+2. 在服务器上生成一个 32 字符的随机令牌：
+   ```bash
+   openssl rand -hex 16
+   ```
+3. 将令牌写入 NewAPI 管理员用户（假设管理员 `id=1`）：
+   ```bash
+   docker exec <postgres容器> psql -U <用户> -d <数据库> \
+     -c "UPDATE users SET access_token='你生成的令牌' WHERE id=1;"
+   ```
+4. 将**同一个令牌**填入 `.env` 的 `GUARD_NEWAPI_ADMIN_TOKEN`
+5. 在 Guard 后台（`/guard/admin/` → 设置）将 `newapi_admin_user_id` 设为 `"1"`
+
+第 5 步是必须的——NewAPI 的管理接口要求 `New-Api-User` 请求头来标识操作者身份，Guard 通过 `newapi_admin_user_id` 设置项来填充这个头。如果不设置，即使令牌正确也会返回认证失败。
 
 ### `GUARD_NEWAPI_ADMIN_TOKEN` 不填会怎样
 
@@ -172,26 +195,42 @@ http://new-api:3000
 
 推荐按下面的顺序部署：
 
-1. 在根目录准备 `.env`
-   可以参考 `.env.example`
-2. 先填好至少这几个值：
+1. 在根目录准备 `.env`（参考 `.env.example`），先填好：
    - `GUARD_ADMIN_PASSWORD`
    - `GUARD_NEWAPI_URL`
-   - `GUARD_IMAGE`
-3. 执行启动：
+   - `GUARD_IMAGE`（如果用本地构建，把 `docker-compose.yml` 中 guard 服务的 `image` 改为 `build: .`）
+2. 启动所有服务：
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-4. 打开 NewAPI，完成首次初始化
-5. 在 NewAPI 中创建或获取管理员令牌
-6. 把这个令牌填回 `.env` 中的 `GUARD_NEWAPI_ADMIN_TOKEN`
-7. 重启 Guard：
+3. 打开 NewAPI 前端，完成首次初始化（创建管理员账号）
+4. 生成随机令牌并写入 NewAPI 管理员用户：
+
+```bash
+# 生成 32 字符令牌
+TOKEN=$(openssl rand -hex 16)
+echo "令牌: $TOKEN"
+
+# 写入数据库（按实际容器名和用户名替换）
+docker exec newapi-guard-postgres-1 psql -U newapi -d newapi \
+  -c "UPDATE users SET access_token='$TOKEN' WHERE id=1;"
+```
+
+5. 将令牌填入 `.env`：
+
+```
+GUARD_NEWAPI_ADMIN_TOKEN=上面生成的令牌
+```
+
+6. 重启 Guard：
 
 ```bash
 docker compose up -d guard
 ```
+
+7. 登录 Guard 后台（`/guard/admin/`），在设置页将 `newapi_admin_user_id` 设为 `1`
 
 ### 默认暴露端口
 
