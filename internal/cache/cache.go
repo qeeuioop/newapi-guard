@@ -19,6 +19,7 @@ type Store struct {
 	tokens sync.Map
 	users  sync.Map
 	rpm    sync.Map
+	rpmMu  sync.Mutex
 }
 
 func New() *Store {
@@ -56,14 +57,19 @@ func (s *Store) IsWhitelist(userID int64) bool {
 }
 
 func (s *Store) IncrementRPM(key string, ttl time.Duration) int {
+	s.rpmMu.Lock()
+	defer s.rpmMu.Unlock()
+
 	now := time.Now()
-	value, _ := s.rpm.LoadOrStore(key, RPMEntry{Count: 0, ExpiresAt: now.Add(ttl)})
-	entry := value.(RPMEntry)
-	if now.After(entry.ExpiresAt) {
+	value, ok := s.rpm.Load(key)
+	var entry RPMEntry
+	if ok {
+		entry = value.(RPMEntry)
+	}
+	if !ok || now.After(entry.ExpiresAt) {
 		entry = RPMEntry{Count: 0, ExpiresAt: now.Add(ttl)}
 	}
 	entry.Count++
-	entry.ExpiresAt = now.Add(ttl)
 	s.rpm.Store(key, entry)
 	return entry.Count
 }

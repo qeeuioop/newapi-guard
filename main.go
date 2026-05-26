@@ -21,6 +21,22 @@ import (
 	"newapiguard/internal/webutil"
 )
 
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, x-api-key, api-key")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	env := config.LoadEnv()
 
@@ -54,7 +70,7 @@ func main() {
 	runtimeCache := cache.New()
 	newAPIClient := newapi.NewClient(systemSettings.GetString("newapi_base_url"), 30*time.Second)
 	newAPIClient.SetAdminUserID(systemSettings.GetString("newapi_admin_user_id"))
-	adminSessions := admin.NewSessionStore(env.SessionTTL)
+	adminSessions := admin.NewPersistentSessionStore(db, env.SessionTTL)
 
 	proxyHandler := proxy.NewHandler(env, db, systemSettings, runtimeCache, newAPIClient)
 	checkinHandler := proxy.NewCheckinHandler(env, db, systemSettings, runtimeCache, newAPIClient)
@@ -74,7 +90,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              env.ListenAddr,
-		Handler:           mux,
+		Handler:           withCORS(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

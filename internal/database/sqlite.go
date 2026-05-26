@@ -34,7 +34,17 @@ func Open(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+const currentSchemaVersion = 1
+
 func Migrate(db *sql.DB) error {
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+		return err
+	}
+	var version int
+	if err := db.QueryRow(`SELECT version FROM schema_version LIMIT 1`).Scan(&version); err != nil {
+		_, _ = db.Exec(`INSERT INTO schema_version(version) VALUES(0)`)
+	}
+
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS users (
 			newapi_user_id INTEGER PRIMARY KEY,
@@ -128,6 +138,10 @@ func Migrate(db *sql.DB) error {
 		return err
 	}
 	if err := ensureColumn(db, "oauth_authorization_codes", "redirect_uri", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+
+	if _, err := db.Exec(`UPDATE schema_version SET version=?`, currentSchemaVersion); err != nil {
 		return err
 	}
 	return nil

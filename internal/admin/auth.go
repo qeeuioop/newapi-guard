@@ -79,6 +79,10 @@ func (s *SessionStore) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+func (s *SessionStore) TTL() time.Duration {
+	return s.ttl
+}
+
 func randomToken(length int) string {
 	raw := make([]byte, length)
 	_, _ = rand.Read(raw)

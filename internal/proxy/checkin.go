@@ -86,6 +86,9 @@ func (h *CheckinHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CheckinHandler) bumpDailyStat(field string) {
+	if !allowedStatFields[field] {
+		return
+	}
 	today := time.Now().Format("2006-01-02")
 	_, _ = h.db.Exec(`INSERT INTO daily_stats(date) VALUES(?) ON CONFLICT(date) DO NOTHING`, today)
 	_, _ = h.db.Exec(`UPDATE daily_stats SET `+field+` = `+field+` + 1 WHERE date=?`, today)

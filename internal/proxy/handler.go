@@ -18,12 +18,13 @@ import (
 )
 
 type Handler struct {
-	env      config.Env
-	db       *sql.DB
-	settings *settings.Store
-	cache    *cache.Store
-	newapi   *newapi.Client
-	proxy    *httputil.ReverseProxy
+	env           config.Env
+	db            *sql.DB
+	settings      *settings.Store
+	cache         *cache.Store
+	newapi        *newapi.Client
+	proxy         *httputil.ReverseProxy
+	tokenCacheTTL time.Duration
 }
 
 func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cacheStore *cache.Store, newapiClient *newapi.Client) *Handler {
@@ -43,23 +44,38 @@ func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cache
 		r.Host = target.Host
 	}
 	return &Handler{
-		env:      env,
-		db:       db,
-		settings: settingsStore,
-		cache:    cacheStore,
-		newapi:   newapiClient,
-		proxy:    rp,
+		env:           env,
+		db:            db,
+		settings:      settingsStore,
+		cache:         cacheStore,
+		newapi:        newapiClient,
+		proxy:         rp,
+		tokenCacheTTL: env.TokenCacheTTL,
 	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet || r.Method == http.MethodOptions {
+	if r.Method == http.MethodOptions {
 		h.proxy.ServeHTTP(w, r)
 		return
 	}
 
 	token := extractToken(r)
 	if token == "" {
+		h.proxy.ServeHTTP(w, r)
+		return
+	}
+
+	if r.Method == http.MethodGet {
+		userID, ok, err := h.resolveUserID(r.Context(), token)
+		if err != nil {
+			webutil.WriteError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		if ok && h.isUserBanned(userID) {
+			h.writeAccessDenied(w, "账户已封禁")
+			return
+		}
 		h.proxy.ServeHTTP(w, r)
 		return
 	}
@@ -109,7 +125,7 @@ func (h *Handler) resolveUserID(ctx context.Context, token string) (int64, bool,
 
 	var userID int64
 	if err := h.db.QueryRow(`SELECT newapi_user_id FROM token_cache WHERE token_key=?`, token).Scan(&userID); err == nil {
-		h.cache.SetToken(token, userID, 5*time.Minute)
+		h.cache.SetToken(token, userID, h.tokenCacheTTL)
 		return userID, true, nil
 	}
 
@@ -187,15 +203,43 @@ func (h *Handler) banUser(ctx context.Context, userID int64, reason, ua, ip stri
 	}
 	var discordID sql.NullString
 	_ = h.db.QueryRow(`SELECT discord_id FROM users WHERE newapi_user_id=?`, userID).Scan(&discordID)
-	_, err := h.db.Exec(`INSERT INTO bans(newapi_user_id, discord_id, reason, violation_ua, client_ip, duration, created_at)
-		VALUES(?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, userID, discordID.String, reason, ua, ip, "permanent")
+
+	duration := h.settings.GetString("ua_auto_ban_duration")
+	if duration == "" {
+		duration = "permanent"
+	}
+	var expireAt any
+	switch duration {
+	case "7d":
+		expireAt = time.Now().Add(7 * 24 * time.Hour).Format(time.RFC3339)
+	case "30d":
+		expireAt = time.Now().Add(30 * 24 * time.Hour).Format(time.RFC3339)
+	default:
+		duration = "permanent"
+		expireAt = nil
+	}
+
+	_, err := h.db.Exec(`INSERT INTO bans(newapi_user_id, discord_id, reason, violation_ua, client_ip, duration, expire_at, created_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, userID, discordID.String, reason, ua, ip, duration, expireAt)
 	if err == nil {
 		h.bumpDailyStat("new_bans")
 	}
 	return err
 }
 
+var allowedStatFields = map[string]bool{
+	"total_requests": true,
+	"blocked_ua":     true,
+	"blocked_rpm":    true,
+	"checkins":       true,
+	"new_users":      true,
+	"new_bans":       true,
+}
+
 func (h *Handler) bumpDailyStat(field string) {
+	if !allowedStatFields[field] {
+		return
+	}
 	today := time.Now().Format("2006-01-02")
 	_, _ = h.db.Exec(`INSERT INTO daily_stats(date) VALUES(?) ON CONFLICT(date) DO NOTHING`, today)
 	_, _ = h.db.Exec(`UPDATE daily_stats SET `+field+` = `+field+` + 1 WHERE date=?`, today)

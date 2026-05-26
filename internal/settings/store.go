@@ -35,6 +35,7 @@ var defaults = map[string]string{
 	"discord_access_policy":   `{"logic":"and","conditions":[],"groups":[]}`,
 	"admin_password":          "",
 	"newapi_admin_token":      "",
+	"ua_auto_ban_duration":    "permanent",
 }
 
 func NewStore(db *sql.DB) (*Store, error) {

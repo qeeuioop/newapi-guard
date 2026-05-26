@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -78,7 +79,7 @@ type UserPage struct {
 }
 
 func (c *Client) SearchToken(ctx context.Context, adminToken, token string) (int64, bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL()+"/api/token/search?keyword="+urlQueryEscape(token), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL()+"/api/token/search?keyword="+url.QueryEscape(token), nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -324,7 +325,7 @@ func (c *Client) GetUser(ctx context.Context, adminToken string, userID int64) (
 }
 
 func (c *Client) SearchUsers(ctx context.Context, adminToken, keyword string, page, pageSize int) ([]User, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/user/search?keyword=%s&p=%d&page_size=%d", c.BaseURL(), urlQueryEscape(keyword), normalizePageParam(page), pageSize), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/user/search?keyword=%s&p=%d&page_size=%d", c.BaseURL(), url.QueryEscape(keyword), normalizePageParam(page), pageSize), nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -382,18 +383,6 @@ func toInt64(value any) (int64, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func urlQueryEscape(value string) string {
-	replacer := strings.NewReplacer(
-		" ", "%20",
-		"+", "%2B",
-		"&", "%26",
-		"=", "%3D",
-		"?", "%3F",
-		"#", "%23",
-	)
-	return replacer.Replace(value)
 }
 
 func normalizePageParam(page int) int {
