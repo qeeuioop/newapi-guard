@@ -17,8 +17,7 @@ type Store struct {
 var defaults = map[string]string{
 	"rpm_limit":               "3",
 	"ua_ban_strikes":          "3",
-	"checkin_quota":           "500000",
-	"checkin_threshold":       "200000",
+	"checkin_threshold":       "0",
 	"newapi_base_url":         "http://new-api:3000",
 	"newapi_admin_user_id":    "",
 	"public_base_url":         "",

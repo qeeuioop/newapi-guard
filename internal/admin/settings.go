@@ -17,7 +17,7 @@ var sensitiveKeys = map[string]bool{
 
 var allowedSettingKeys = map[string]bool{
 	"rpm_limit": true, "ua_ban_strikes": true, "allowed_ua": true,
-	"checkin_quota": true, "checkin_threshold": true,
+	"checkin_threshold": true,
 	"newapi_base_url": true, "newapi_admin_token": true, "newapi_admin_user_id": true,
 	"public_base_url": true, "admin_password": true,
 	"oauth_client_id": true, "oauth_client_secret": true, "oauth_provider_slug": true,
@@ -39,8 +39,7 @@ func (h *Handler) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		"rpm_limit":               h.settings.GetInt("rpm_limit", 3),
 		"ua_ban_strikes":          h.settings.GetInt("ua_ban_strikes", 3),
 		"allowed_ua":              h.settings.GetStringSlice("allowed_ua"),
-		"checkin_quota":           h.settings.GetInt("checkin_quota", 500000),
-		"checkin_threshold":       h.settings.GetInt("checkin_threshold", 200000),
+		"checkin_threshold":       h.settings.GetInt("checkin_threshold", 0),
 		"newapi_base_url":         h.settings.GetString("newapi_base_url"),
 		"newapi_admin_token":      maskSecret(h.settings.GetString("newapi_admin_token")),
 		"newapi_admin_user_id":    h.settings.GetString("newapi_admin_user_id"),
