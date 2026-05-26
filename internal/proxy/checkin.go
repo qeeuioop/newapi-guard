@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"fmt"
 	"newapiguard/internal/cache"
 	"newapiguard/internal/config"
 	"newapiguard/internal/newapi"
@@ -75,11 +76,13 @@ func (h *CheckinHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.bumpDailyStat("checkins")
+	dollars := float64(quota) / 500000.0
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{
 		"success": true,
-		"message": "签到成功",
+		"message": fmt.Sprintf("签到成功，获得 $%.2f", dollars),
 		"data": map[string]any{
 			"quota_awarded": quota,
+			"quota_dollars": fmt.Sprintf("$%.2f", dollars),
 			"checkin_date":  today,
 		},
 	})
