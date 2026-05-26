@@ -51,7 +51,6 @@ func (h *CheckinHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	threshold := h.settings.GetInt("checkin_threshold", 0)
-	log.Printf("[checkin] POST threshold=%d", threshold)
 	if threshold > 0 {
 		user, err := h.newapi.GetUserSelf(r.Context(), r.Header)
 		if err != nil {
@@ -59,8 +58,17 @@ func (h *CheckinHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			webutil.WriteError(w, http.StatusUnauthorized, "无法识别当前用户")
 			return
 		}
-		log.Printf("[checkin] user=%d quota=%d threshold=%d blocked=%v", user.UserID, user.Quota, threshold, user.Quota >= threshold)
-		if user.Quota >= threshold {
+
+		adminToken := h.settings.GetString("newapi_admin_token")
+		fullUser, err := h.newapi.GetUser(r.Context(), adminToken, user.UserID)
+		if err != nil {
+			log.Printf("[checkin] GetUser(%d) failed: %v", user.UserID, err)
+			webutil.WriteError(w, http.StatusInternalServerError, "查询余额失败")
+			return
+		}
+
+		log.Printf("[checkin] user=%d quota=%d threshold=%d blocked=%v", fullUser.ID, fullUser.Quota, threshold, fullUser.Quota >= threshold)
+		if fullUser.Quota >= threshold {
 			dollars := float64(threshold) / 500000.0
 			webutil.WriteError(w, http.StatusBadRequest, fmt.Sprintf("余额超过 $%.2f，无需签到", dollars))
 			return
