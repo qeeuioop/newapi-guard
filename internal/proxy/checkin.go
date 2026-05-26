@@ -57,6 +57,8 @@ func (h *CheckinHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, _ = h.db.Exec(`INSERT OR IGNORE INTO users(newapi_user_id) VALUES(?)`, user.UserID)
+
 	today := time.Now().Format("2006-01-02")
 	var exists int
 	_ = h.db.QueryRow(`SELECT 1 FROM checkin_records WHERE newapi_user_id=? AND checked_at=?`, user.UserID, today).Scan(&exists)
