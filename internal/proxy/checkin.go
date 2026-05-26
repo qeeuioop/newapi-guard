@@ -3,6 +3,7 @@ package proxy
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -50,12 +51,15 @@ func (h *CheckinHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	threshold := h.settings.GetInt("checkin_threshold", 0)
+	log.Printf("[checkin] POST threshold=%d", threshold)
 	if threshold > 0 {
 		user, err := h.newapi.GetUserSelf(r.Context(), r.Header)
 		if err != nil {
+			log.Printf("[checkin] GetUserSelf failed: %v", err)
 			webutil.WriteError(w, http.StatusUnauthorized, "无法识别当前用户")
 			return
 		}
+		log.Printf("[checkin] user=%d quota=%d threshold=%d blocked=%v", user.UserID, user.Quota, threshold, user.Quota >= threshold)
 		if user.Quota >= threshold {
 			dollars := float64(threshold) / 500000.0
 			webutil.WriteError(w, http.StatusBadRequest, fmt.Sprintf("余额超过 $%.2f，无需签到", dollars))
