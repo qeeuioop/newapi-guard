@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -138,6 +140,12 @@ func (c *Client) GetUserSelf(ctx context.Context, headers http.Header) (*UserSel
 		return nil, fmt.Errorf("newapi 状态码异常: %d", resp.StatusCode)
 	}
 
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("[GetUserSelf] raw response: %s", string(raw))
+
 	var payload struct {
 		Data struct {
 			ID     int64 `json:"id"`
@@ -148,7 +156,7 @@ func (c *Client) GetUserSelf(ctx context.Context, headers http.Header) (*UserSel
 		UserID int64 `json:"user_id"`
 		Quota  int   `json:"quota"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, err
 	}
 
