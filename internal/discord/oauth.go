@@ -632,16 +632,14 @@ func (h *Handler) cleanStaleData(ctx context.Context) {
 	}
 	defer pgDB.Close()
 
-	res, _ := pgDB.ExecContext(ctx, `
-		DELETE FROM user_oauth_bindings
-		WHERE NOT EXISTS (
-		    SELECT 1 FROM users u
-		    WHERE u.id = user_oauth_bindings.user_id AND u.deleted_at IS NULL
-		)`)
-	if n, _ := res.RowsAffected(); n > 0 {
-		_, _ = pgDB.ExecContext(ctx, `SELECT setval('users_id_seq', COALESCE((SELECT MAX(id) FROM users), 1))`)
+	// PG: 清理指向已删除用户的孤儿数据
+	for _, t := range []string{"user_oauth_bindings", "tokens", "checkins", "quota_data", "top_ups"} {
+		_, _ = pgDB.ExecContext(ctx, `DELETE FROM `+t+` WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = `+t+`.user_id AND u.deleted_at IS NULL)`)
 	}
+	// PG: 硬删除软删除的用户
+	_, _ = pgDB.ExecContext(ctx, `DELETE FROM users WHERE deleted_at IS NOT NULL`)
 
+	// 获取 PG 活跃用户 ID 列表
 	rows, err := pgDB.QueryContext(ctx, `SELECT id FROM users WHERE deleted_at IS NULL`)
 	if err != nil {
 		return
@@ -658,6 +656,7 @@ func (h *Handler) cleanStaleData(ctx context.Context) {
 		return
 	}
 
+	// Guard SQLite: 清理已不存在于 PG 的用户关联数据
 	keep := strings.Join(ids, ",")
 	for _, t := range []string{"checkin_records", "token_cache", "ua_strikes"} {
 		_, _ = h.db.Exec(`DELETE FROM ` + t + ` WHERE newapi_user_id NOT IN (` + keep + `)`)
