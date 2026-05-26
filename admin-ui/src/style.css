@@ -226,6 +226,13 @@ body::before {
   font-size: 1rem;
 }
 
+.field-hint {
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-left: 6px;
+}
+
 .field-label-with-help {
   display: inline-flex;
   align-items: center;

@@ -31,11 +31,15 @@
             <input v-model.number="settingsModel.ua_ban_strikes" class="app-input" type="number" min="1" />
           </label>
           <label class="field">
-            <span class="field-label">签到补发额度</span>
+            <span class="field-label">签到补发额度
+              <span class="field-hint" v-if="settingsModel.checkin_quota">≈ ${{ (settingsModel.checkin_quota / 500000).toFixed(2) }}</span>
+            </span>
             <input v-model.number="settingsModel.checkin_quota" class="app-input" type="number" min="0" />
           </label>
           <label class="field">
-            <span class="field-label">签到余额阈值</span>
+            <span class="field-label">签到余额阈值
+              <span class="field-hint" v-if="settingsModel.checkin_threshold">≈ ${{ (settingsModel.checkin_threshold / 500000).toFixed(2) }}</span>
+            </span>
             <input v-model.number="settingsModel.checkin_threshold" class="app-input" type="number" min="0" />
           </label>
         </div>
