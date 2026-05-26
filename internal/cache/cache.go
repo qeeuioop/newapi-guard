@@ -15,6 +15,13 @@ type RPMEntry struct {
 	ExpiresAt time.Time
 }
 
+type whitelistEntry struct {
+	ok        bool
+	expiresAt time.Time
+}
+
+const whitelistTTL = 5 * time.Minute
+
 type Store struct {
 	tokens sync.Map
 	users  sync.Map
@@ -44,7 +51,7 @@ func (s *Store) GetToken(token string) (int64, bool) {
 }
 
 func (s *Store) SetWhitelist(userID int64, ok bool) {
-	s.users.Store(userID, ok)
+	s.users.Store(userID, whitelistEntry{ok: ok, expiresAt: time.Now().Add(whitelistTTL)})
 }
 
 func (s *Store) IsWhitelist(userID int64) bool {
@@ -52,8 +59,20 @@ func (s *Store) IsWhitelist(userID int64) bool {
 	if !ok {
 		return false
 	}
-	flag, _ := value.(bool)
-	return flag
+	entry, ok := value.(whitelistEntry)
+	if !ok {
+		s.users.Delete(userID)
+		return false
+	}
+	if time.Now().After(entry.expiresAt) {
+		s.users.Delete(userID)
+		return false
+	}
+	return entry.ok
+}
+
+func (s *Store) DeleteWhitelist(userID int64) {
+	s.users.Delete(userID)
 }
 
 func (s *Store) IncrementRPM(key string, ttl time.Duration) int {
@@ -85,6 +104,12 @@ func (s *Store) Cleanup() {
 	s.rpm.Range(func(key, value any) bool {
 		if entry, ok := value.(RPMEntry); ok && now.After(entry.ExpiresAt) {
 			s.rpm.Delete(key)
+		}
+		return true
+	})
+	s.users.Range(func(key, value any) bool {
+		if entry, ok := value.(whitelistEntry); ok && now.After(entry.expiresAt) {
+			s.users.Delete(key)
 		}
 		return true
 	})

@@ -18,8 +18,8 @@ var sensitiveKeys = map[string]bool{
 var allowedSettingKeys = map[string]bool{
 	"rpm_limit": true, "ua_ban_strikes": true, "allowed_ua": true,
 	"checkin_threshold": true,
-	"newapi_base_url": true, "newapi_admin_token": true, "newapi_admin_user_id": true,
-	"public_base_url": true, "admin_password": true,
+	"newapi_base_url":   true, "newapi_admin_token": true, "newapi_admin_user_id": true,
+	"public_base_url": true, "allowed_origins": true, "admin_password": true,
 	"oauth_client_id": true, "oauth_client_secret": true, "oauth_provider_slug": true,
 	"oauth_state_ttl_seconds": true, "oauth_code_ttl_seconds": true, "oauth_token_ttl_seconds": true,
 	"discord_client_id": true, "discord_client_secret": true, "discord_guild_id": true,
@@ -44,6 +44,7 @@ func (h *Handler) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		"newapi_admin_token":      maskSecret(h.settings.GetString("newapi_admin_token")),
 		"newapi_admin_user_id":    h.settings.GetString("newapi_admin_user_id"),
 		"public_base_url":         h.settings.GetString("public_base_url"),
+		"allowed_origins":         h.settings.GetStringSlice("allowed_origins"),
 		"admin_password":          maskSecret(h.settings.GetString("admin_password")),
 		"oauth_client_id":         h.settings.GetString("oauth_client_id"),
 		"oauth_client_secret":     maskSecret(h.settings.GetString("oauth_client_secret")),

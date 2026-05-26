@@ -4,8 +4,10 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,9 +23,11 @@ import (
 	"newapiguard/internal/webutil"
 )
 
-func withCORS(next http.Handler) http.Handler {
+func withCORS(settingsStore *settings.Store, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if origin := r.Header.Get("Origin"); origin != "" {
+		w.Header().Add("Vary", "Origin")
+		origin := r.Header.Get("Origin")
+		if origin != "" && isAllowedOrigin(settingsStore, origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, x-api-key, api-key")
@@ -35,6 +39,28 @@ func withCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isAllowedOrigin(settingsStore *settings.Store, origin string) bool {
+	allowedOrigins := settingsStore.GetStringSlice("allowed_origins")
+	if len(allowedOrigins) > 0 {
+		for _, allowedOrigin := range allowedOrigins {
+			if strings.TrimSpace(allowedOrigin) == origin {
+				return true
+			}
+		}
+		return false
+	}
+
+	publicBaseURL := strings.TrimSpace(settingsStore.GetString("public_base_url"))
+	if publicBaseURL == "" {
+		return false
+	}
+	parsed, err := url.Parse(publicBaseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return false
+	}
+	return origin == parsed.Scheme+"://"+parsed.Host
 }
 
 func main() {
@@ -90,7 +116,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              env.ListenAddr,
-		Handler:           withCORS(mux),
+		Handler:           withCORS(systemSettings, mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

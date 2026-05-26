@@ -29,6 +29,7 @@ type Handler struct {
 	cache    *cache.Store
 	sessions SessionProvider
 	newapi   *newapi.Client
+	limiter  *LoginLimiter
 }
 
 func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cacheStore *cache.Store, sessions SessionProvider, newapiClient *newapi.Client) *Handler {
@@ -39,6 +40,7 @@ func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cache
 		cache:    cacheStore,
 		sessions: sessions,
 		newapi:   newapiClient,
+		limiter:  NewLoginLimiter(5, 15*time.Minute),
 	}
 }
 
@@ -90,6 +92,12 @@ func (h *Handler) withAuth(next http.Handler) http.Handler {
 }
 
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+	if h.limiter.IsLocked(ip) {
+		webutil.WriteError(w, http.StatusTooManyRequests, "登录尝试过多，请稍后再试")
+		return
+	}
+
 	var req struct {
 		Password string `json:"password"`
 	}
@@ -99,9 +107,11 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	storedPassword := h.settings.GetString("admin_password")
 	if req.Password == "" || storedPassword == "" || !webutil.ConstantTimeEqual(req.Password, storedPassword) {
+		h.limiter.RecordFailure(ip)
 		webutil.WriteError(w, http.StatusUnauthorized, "密码错误")
 		return
 	}
+	h.limiter.ClearFailures(ip)
 	token := h.sessions.Create()
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{
 		"success":   true,

@@ -21,6 +21,7 @@ var defaults = map[string]string{
 	"newapi_base_url":             "http://new-api:3000",
 	"newapi_admin_user_id":        "",
 	"public_base_url":             "",
+	"allowed_origins":             `[]`,
 	"oauth_client_id":             "",
 	"oauth_client_secret":         "",
 	"oauth_allowed_redirect_uris": `[]`,
