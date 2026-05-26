@@ -631,11 +631,14 @@ func cleanStaleBinding(ctx context.Context, discordID string) {
 		return
 	}
 	defer db.Close()
-	_, _ = db.ExecContext(ctx, `
+	res, _ := db.ExecContext(ctx, `
 		DELETE FROM user_oauth_bindings ob
 		WHERE ob.provider_user_id = $1
 		  AND NOT EXISTS (
 		    SELECT 1 FROM users u
 		    WHERE u.id = ob.user_id AND u.deleted_at IS NULL
 		  )`, "discord:"+discordID)
+	if n, _ := res.RowsAffected(); n > 0 {
+		_, _ = db.ExecContext(ctx, `SELECT setval('users_id_seq', COALESCE((SELECT MAX(id) FROM users), 1))`)
+	}
 }
