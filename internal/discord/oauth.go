@@ -1,15 +1,19 @@
 package discord
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
+	_ "github.com/lib/pq"
 	"newapiguard/internal/webutil"
 )
 
@@ -146,6 +150,8 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		h.redirectError(w, r, redirectURI, originalState, "access_denied", reason)
 		return
 	}
+
+	cleanStaleBinding(r.Context(), upstreamUser.ID)
 
 	displayName := displayName(member, upstreamUser)
 	payload := oauthPayload{
@@ -613,4 +619,23 @@ func fallbackString(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func cleanStaleBinding(ctx context.Context, discordID string) {
+	dsn := os.Getenv("GUARD_POSTGRES_DSN")
+	if dsn == "" {
+		return
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	_, _ = db.ExecContext(ctx, `
+		DELETE FROM user_oauth_bindings ob
+		WHERE ob.provider_user_id = $1
+		  AND NOT EXISTS (
+		    SELECT 1 FROM users u
+		    WHERE u.id = ob.user_id AND u.deleted_at IS NULL
+		  )`, "discord:"+discordID)
 }
