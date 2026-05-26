@@ -140,9 +140,11 @@ func (c *Client) GetUserSelf(ctx context.Context, headers http.Header) (*UserSel
 
 	var payload struct {
 		Data struct {
+			ID     int64 `json:"id"`
 			UserID int64 `json:"user_id"`
 			Quota  int   `json:"quota"`
 		} `json:"data"`
+		ID     int64 `json:"id"`
 		UserID int64 `json:"user_id"`
 		Quota  int   `json:"quota"`
 	}
@@ -150,9 +152,12 @@ func (c *Client) GetUserSelf(ctx context.Context, headers http.Header) (*UserSel
 		return nil, err
 	}
 
-	result := &UserSelf{UserID: payload.UserID, Quota: payload.Quota}
-	if result.UserID == 0 && payload.Data.UserID != 0 {
-		result.UserID = payload.Data.UserID
+	result := &UserSelf{Quota: payload.Quota}
+	for _, id := range []int64{payload.Data.ID, payload.Data.UserID, payload.ID, payload.UserID} {
+		if id != 0 {
+			result.UserID = id
+			break
+		}
 	}
 	if result.Quota == 0 && payload.Data.Quota != 0 {
 		result.Quota = payload.Data.Quota

@@ -3,10 +3,13 @@ package proxy
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"strings"
 	"time"
 
-	"fmt"
 	"newapiguard/internal/cache"
 	"newapiguard/internal/config"
 	"newapiguard/internal/newapi"
@@ -15,28 +18,36 @@ import (
 )
 
 type CheckinHandler struct {
-	env      config.Env
-	db       *sql.DB
-	settings *settings.Store
-	cache    *cache.Store
-	newapi   *newapi.Client
-	proxy    *Handler
+	env       config.Env
+	db        *sql.DB
+	settings  *settings.Store
+	cache     *cache.Store
+	newapi    *newapi.Client
+	passthru  *httputil.ReverseProxy
 }
 
 func NewCheckinHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cacheStore *cache.Store, newapiClient *newapi.Client) *CheckinHandler {
+	rp := &httputil.ReverseProxy{
+		Director: func(r *http.Request) {
+			target, _ := url.Parse(strings.TrimRight(newapiClient.BaseURL(), "/"))
+			r.URL.Scheme = target.Scheme
+			r.URL.Host = target.Host
+			r.Host = target.Host
+		},
+	}
 	return &CheckinHandler{
-		env:      env,
-		db:       db,
-		settings: settingsStore,
-		cache:    cacheStore,
-		newapi:   newapiClient,
-		proxy:    NewHandler(env, db, settingsStore, cacheStore, newapiClient),
+		env:       env,
+		db:        db,
+		settings:  settingsStore,
+		cache:     cacheStore,
+		newapi:    newapiClient,
+		passthru:  rp,
 	}
 }
 
 func (h *CheckinHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		h.proxy.proxy.ServeHTTP(w, r)
+		h.passthru.ServeHTTP(w, r)
 		return
 	}
 
