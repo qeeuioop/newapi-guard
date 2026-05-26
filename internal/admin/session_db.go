@@ -1,12 +1,12 @@
 package admin
 
 import (
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"net/http"
 	"sync"
 	"time"
+
+	"newapiguard/internal/webutil"
 )
 
 type PersistentSessionStore struct {
@@ -56,9 +56,7 @@ func (s *PersistentSessionStore) loadFromDB() {
 }
 
 func (s *PersistentSessionStore) Create() string {
-	raw := make([]byte, 32)
-	_, _ = rand.Read(raw)
-	token := hex.EncodeToString(raw)
+	token := webutil.RandomToken(32)
 	expiresAt := time.Now().Add(s.ttl)
 
 	s.mu.Lock()

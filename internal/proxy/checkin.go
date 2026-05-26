@@ -28,10 +28,20 @@ type CheckinHandler struct {
 func NewCheckinHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cacheStore *cache.Store, newapiClient *newapi.Client) *CheckinHandler {
 	rp := &httputil.ReverseProxy{
 		Director: func(r *http.Request) {
-			target, _ := url.Parse(strings.TrimRight(newapiClient.BaseURL(), "/"))
+			target, err := url.Parse(strings.TrimRight(newapiClient.BaseURL(), "/"))
+			if err != nil || target == nil || target.Host == "" {
+				log.Printf("[checkin] newapi_base_url 解析失败: %v", err)
+				r.URL.Scheme = ""
+				r.URL.Host = ""
+				r.Host = ""
+				return
+			}
 			r.URL.Scheme = target.Scheme
 			r.URL.Host = target.Host
 			r.Host = target.Host
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			webutil.WriteError(w, http.StatusBadGateway, "上游服务不可用")
 		},
 	}
 	return &CheckinHandler{
@@ -77,4 +87,3 @@ func (h *CheckinHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.passthru.ServeHTTP(w, r)
 }
-

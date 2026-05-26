@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"newapiguard/internal/cache"
@@ -10,7 +11,7 @@ import (
 	"newapiguard/internal/settings"
 )
 
-func Start(ctx context.Context, db *sql.DB, settingsStore *settings.Store, runtimeCache *cache.Store, client *newapi.Client) {
+func Start(ctx context.Context, db *sql.DB, settingsStore *settings.Store, runtimeCache *cache.Store, client *newapi.Client, tokenCacheTTL time.Duration) {
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
@@ -20,11 +21,19 @@ func Start(ctx context.Context, db *sql.DB, settingsStore *settings.Store, runti
 				return
 			case <-ticker.C:
 				runtimeCache.Cleanup()
+				cleanupExpiredTokenCache(db, tokenCacheTTL)
 				cleanupExpiredBans(db, settingsStore, client)
 				cleanupExpiredOAuth(db)
 			}
 		}
 	}()
+}
+
+func cleanupExpiredTokenCache(db *sql.DB, ttl time.Duration) {
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	_, _ = db.Exec(`DELETE FROM token_cache WHERE cached_at <= datetime('now', ?)`, fmt.Sprintf("-%d seconds", int(ttl.Seconds())))
 }
 
 func cleanupExpiredBans(db *sql.DB, settingsStore *settings.Store, client *newapi.Client) {

@@ -2,10 +2,7 @@ module newapiguard
 
 go 1.24
 
-require (
-	github.com/lib/pq v1.10.9
-	modernc.org/sqlite v1.39.0
-)
+require modernc.org/sqlite v1.39.0
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

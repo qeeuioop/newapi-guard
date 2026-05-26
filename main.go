@@ -95,7 +95,7 @@ func main() {
 	}
 
 	if env.EnableScheduler {
-		tasks.Start(context.Background(), db, systemSettings, runtimeCache, newAPIClient)
+		tasks.Start(context.Background(), db, systemSettings, runtimeCache, newAPIClient, env.TokenCacheTTL)
 	}
 
 	go func() {

@@ -1,11 +1,11 @@
 package admin
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"net/http"
 	"sync"
 	"time"
+
+	"newapiguard/internal/webutil"
 )
 
 type Session struct {
@@ -27,7 +27,7 @@ func NewSessionStore(ttl time.Duration) *SessionStore {
 }
 
 func (s *SessionStore) Create() string {
-	token := randomToken(32)
+	token := webutil.RandomToken(32)
 	s.mu.Lock()
 	s.sessions[token] = Session{
 		Token:     token,
@@ -81,10 +81,4 @@ func (s *SessionStore) Middleware(next http.Handler) http.Handler {
 
 func (s *SessionStore) TTL() time.Duration {
 	return s.ttl
-}
-
-func randomToken(length int) string {
-	raw := make([]byte, length)
-	_, _ = rand.Read(raw)
-	return hex.EncodeToString(raw)
 }

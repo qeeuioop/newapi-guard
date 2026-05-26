@@ -97,7 +97,8 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		webutil.WriteError(w, http.StatusBadRequest, "请求体无效")
 		return
 	}
-	if req.Password == "" || req.Password != h.settings.GetString("admin_password") {
+	storedPassword := h.settings.GetString("admin_password")
+	if req.Password == "" || storedPassword == "" || !webutil.ConstantTimeEqual(req.Password, storedPassword) {
 		webutil.WriteError(w, http.StatusUnauthorized, "密码错误")
 		return
 	}

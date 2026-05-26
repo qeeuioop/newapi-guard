@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -35,7 +36,11 @@ func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cache
 	}
 	rp.Director = func(r *http.Request) {
 		target, err := url.Parse(strings.TrimRight(newapiClient.BaseURL(), "/"))
-		if err != nil {
+		if err != nil || target == nil || target.Host == "" {
+			log.Printf("[proxy] newapi_base_url 解析失败: %v", err)
+			r.URL.Scheme = ""
+			r.URL.Host = ""
+			r.Host = ""
 			return
 		}
 		r.URL.Scheme = target.Scheme
@@ -124,7 +129,7 @@ func (h *Handler) resolveUserID(ctx context.Context, token string) (int64, bool,
 	}
 
 	var userID int64
-	if err := h.db.QueryRow(`SELECT newapi_user_id FROM token_cache WHERE token_key=?`, token).Scan(&userID); err == nil {
+	if err := h.db.QueryRow(`SELECT newapi_user_id FROM token_cache WHERE token_key=? AND cached_at > datetime('now', ?)`, token, ttlSQLiteModifier(h.tokenCacheTTL)).Scan(&userID); err == nil {
 		h.cache.SetToken(token, userID, h.tokenCacheTTL)
 		return userID, true, nil
 	}
@@ -140,8 +145,15 @@ func (h *Handler) resolveUserID(ctx context.Context, token string) (int64, bool,
 	_, _ = h.db.Exec(`INSERT INTO users(newapi_user_id) VALUES(?) ON CONFLICT(newapi_user_id) DO NOTHING`, resolved)
 	_, _ = h.db.Exec(`INSERT INTO token_cache(token_key, newapi_user_id) VALUES(?, ?)
 		ON CONFLICT(token_key) DO UPDATE SET newapi_user_id=excluded.newapi_user_id, cached_at=CURRENT_TIMESTAMP`, token, resolved)
-	h.cache.SetToken(token, resolved, 5*time.Minute)
+	h.cache.SetToken(token, resolved, h.tokenCacheTTL)
 	return resolved, true, nil
+}
+
+func ttlSQLiteModifier(ttl time.Duration) string {
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	return fmt.Sprintf("-%d seconds", int(ttl.Seconds()))
 }
 
 func (h *Handler) loadWhitelist(userID int64) bool {

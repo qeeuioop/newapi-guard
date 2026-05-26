@@ -2,6 +2,8 @@ package webutil
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -45,8 +47,16 @@ func CloneHeader(dst, src http.Header) {
 	}
 }
 
+func ConstantTimeEqual(a, b string) bool {
+	ah := sha256.Sum256([]byte(a))
+	bh := sha256.Sum256([]byte(b))
+	return subtle.ConstantTimeCompare(ah[:], bh[:]) == 1
+}
+
 func RandomToken(length int) string {
 	raw := make([]byte, length)
-	_, _ = rand.Read(raw)
+	if _, err := rand.Read(raw); err != nil {
+		panic("crypto/rand 不可用: " + err.Error())
+	}
 	return hex.EncodeToString(raw)
 }

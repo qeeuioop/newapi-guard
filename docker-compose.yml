@@ -39,7 +39,6 @@ services:
       GUARD_SESSION_TTL: ${GUARD_SESSION_TTL:-24h}
       GUARD_TOKEN_CACHE_TTL: ${GUARD_TOKEN_CACHE_TTL:-5m}
       GUARD_ENABLE_SCHEDULER: ${GUARD_ENABLE_SCHEDULER:-true}
-      GUARD_POSTGRES_DSN: postgresql://${POSTGRES_USER:-root}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-new-api}?sslmode=disable
     volumes:
       - ./data/guard:/app/data
     networks:

@@ -1,19 +1,15 @@
 package discord
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
-	_ "github.com/lib/pq"
 	"newapiguard/internal/webutil"
 )
 
@@ -70,6 +66,10 @@ func (h *Handler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	if clientID != h.settings.GetString("oauth_client_id") {
 		webutil.WriteError(w, http.StatusUnauthorized, "client_id 不匹配")
+		return
+	}
+	if !h.allowedRedirectURI(redirectURI) {
+		webutil.WriteError(w, http.StatusBadRequest, "redirect_uri 不在允许列表中")
 		return
 	}
 	if h.settings.GetString("discord_client_id") == "" || h.settings.GetString("discord_client_secret") == "" {
@@ -151,8 +151,6 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.cleanStaleData(r.Context())
-
 	displayName := displayName(member, upstreamUser)
 	payload := oauthPayload{
 		Sub:           "discord:" + upstreamUser.ID,
@@ -194,7 +192,11 @@ func (h *Handler) handleToken(w http.ResponseWriter, r *http.Request) {
 		webutil.WriteError(w, http.StatusBadRequest, "grant_type 无效")
 		return
 	}
-	if r.PostForm.Get("client_id") != h.settings.GetString("oauth_client_id") || r.PostForm.Get("client_secret") != h.settings.GetString("oauth_client_secret") {
+	configuredClientID := h.settings.GetString("oauth_client_id")
+	storedSecret := h.settings.GetString("oauth_client_secret")
+	reqClientID := r.PostForm.Get("client_id")
+	reqSecret := r.PostForm.Get("client_secret")
+	if reqClientID == "" || configuredClientID == "" || reqClientID != configuredClientID || reqSecret == "" || storedSecret == "" || !webutil.ConstantTimeEqual(reqSecret, storedSecret) {
 		webutil.WriteError(w, http.StatusUnauthorized, "客户端凭据无效")
 		return
 	}
@@ -402,6 +404,27 @@ func (h *Handler) discordScopes() []string {
 		return []string{"identify", "guilds.members.read"}
 	}
 	return scopes
+}
+
+func (h *Handler) allowedRedirectURI(redirectURI string) bool {
+	if strings.TrimSpace(redirectURI) == "" {
+		return false
+	}
+	allowed := h.settings.GetStringSlice("oauth_allowed_redirect_uris")
+	if len(allowed) == 0 {
+		publicBaseURL := strings.TrimRight(strings.TrimSpace(h.settings.GetString("public_base_url")), "/")
+		providerSlug := strings.Trim(strings.TrimSpace(h.settings.GetString("oauth_provider_slug")), "/")
+		if publicBaseURL == "" || providerSlug == "" {
+			return false
+		}
+		allowed = []string{publicBaseURL + "/oauth/" + providerSlug}
+	}
+	for _, item := range allowed {
+		if redirectURI == strings.TrimSpace(item) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) publicBaseURL(r *http.Request) string {
@@ -619,47 +642,4 @@ func fallbackString(value, fallback string) string {
 		return fallback
 	}
 	return value
-}
-
-func (h *Handler) cleanStaleData(ctx context.Context) {
-	dsn := os.Getenv("GUARD_POSTGRES_DSN")
-	if dsn == "" {
-		return
-	}
-	pgDB, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return
-	}
-	defer pgDB.Close()
-
-	// PG: 清理指向已删除用户的孤儿数据
-	for _, t := range []string{"user_oauth_bindings", "tokens", "checkins", "quota_data", "top_ups"} {
-		_, _ = pgDB.ExecContext(ctx, `DELETE FROM `+t+` WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = `+t+`.user_id AND u.deleted_at IS NULL)`)
-	}
-	// PG: 硬删除软删除的用户
-	_, _ = pgDB.ExecContext(ctx, `DELETE FROM users WHERE deleted_at IS NOT NULL`)
-
-	// 获取 PG 活跃用户 ID 列表
-	rows, err := pgDB.QueryContext(ctx, `SELECT id FROM users WHERE deleted_at IS NULL`)
-	if err != nil {
-		return
-	}
-	var ids []string
-	for rows.Next() {
-		var id int64
-		if rows.Scan(&id) == nil {
-			ids = append(ids, fmt.Sprintf("%d", id))
-		}
-	}
-	rows.Close()
-	if len(ids) == 0 {
-		return
-	}
-
-	// Guard SQLite: 清理已不存在于 PG 的用户关联数据
-	keep := strings.Join(ids, ",")
-	for _, t := range []string{"checkin_records", "token_cache", "ua_strikes"} {
-		_, _ = h.db.Exec(`DELETE FROM ` + t + ` WHERE newapi_user_id NOT IN (` + keep + `)`)
-	}
-	_, _ = h.db.Exec(`DELETE FROM users WHERE newapi_user_id NOT IN (` + keep + `)`)
 }
