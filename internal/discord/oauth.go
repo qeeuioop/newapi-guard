@@ -151,7 +151,7 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	cleanStaleBinding(r.Context(), upstreamUser.ID)
+	h.cleanStaleData(r.Context())
 
 	displayName := displayName(member, upstreamUser)
 	payload := oauthPayload{
@@ -621,23 +621,46 @@ func fallbackString(value, fallback string) string {
 	return value
 }
 
-func cleanStaleBinding(ctx context.Context, discordID string) {
+func (h *Handler) cleanStaleData(ctx context.Context) {
 	dsn := os.Getenv("GUARD_POSTGRES_DSN")
 	if dsn == "" {
 		return
 	}
-	db, err := sql.Open("postgres", dsn)
+	pgDB, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return
 	}
-	defer db.Close()
-	res, _ := db.ExecContext(ctx, `
-		DELETE FROM user_oauth_bindings ob
+	defer pgDB.Close()
+
+	res, _ := pgDB.ExecContext(ctx, `
+		DELETE FROM user_oauth_bindings
 		WHERE NOT EXISTS (
 		    SELECT 1 FROM users u
-		    WHERE u.id = ob.user_id AND u.deleted_at IS NULL
+		    WHERE u.id = user_oauth_bindings.user_id AND u.deleted_at IS NULL
 		)`)
 	if n, _ := res.RowsAffected(); n > 0 {
-		_, _ = db.ExecContext(ctx, `SELECT setval('users_id_seq', COALESCE((SELECT MAX(id) FROM users), 1))`)
+		_, _ = pgDB.ExecContext(ctx, `SELECT setval('users_id_seq', COALESCE((SELECT MAX(id) FROM users), 1))`)
 	}
+
+	rows, err := pgDB.QueryContext(ctx, `SELECT id FROM users WHERE deleted_at IS NULL`)
+	if err != nil {
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, fmt.Sprintf("%d", id))
+		}
+	}
+	rows.Close()
+	if len(ids) == 0 {
+		return
+	}
+
+	keep := strings.Join(ids, ",")
+	for _, t := range []string{"checkin_records", "token_cache", "ua_strikes"} {
+		_, _ = h.db.Exec(`DELETE FROM ` + t + ` WHERE newapi_user_id NOT IN (` + keep + `)`)
+	}
+	_, _ = h.db.Exec(`DELETE FROM users WHERE newapi_user_id NOT IN (` + keep + `)`)
 }
