@@ -9,6 +9,7 @@ import (
 type Env struct {
 	ListenAddr        string
 	NewAPIURL         string
+	NewAPISQLDSN      string
 	NewAPIAdminUserID string
 	DataDir           string
 	DBPath            string
@@ -25,6 +26,7 @@ func LoadEnv() Env {
 	return Env{
 		ListenAddr:        getEnv("GUARD_LISTEN_ADDR", ":9000"),
 		NewAPIURL:         getEnv("GUARD_NEWAPI_URL", ""),
+		NewAPISQLDSN:      getEnv("GUARD_NEWAPI_SQL_DSN", ""),
 		NewAPIAdminUserID: getEnv("GUARD_NEWAPI_ADMIN_USER_ID", ""),
 		DataDir:           dataDir,
 		DBPath:            getEnv("GUARD_DB_PATH", dataDir+"/guard.db"),

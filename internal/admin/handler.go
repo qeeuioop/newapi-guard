@@ -29,10 +29,11 @@ type Handler struct {
 	cache    *cache.Store
 	sessions SessionProvider
 	newapi   *newapi.Client
+	tokens   *newapi.TokenResolver
 	limiter  *LoginLimiter
 }
 
-func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cacheStore *cache.Store, sessions SessionProvider, newapiClient *newapi.Client) *Handler {
+func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cacheStore *cache.Store, sessions SessionProvider, newapiClient *newapi.Client, tokenResolver *newapi.TokenResolver) *Handler {
 	return &Handler{
 		env:      env,
 		db:       db,
@@ -40,6 +41,7 @@ func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cache
 		cache:    cacheStore,
 		sessions: sessions,
 		newapi:   newapiClient,
+		tokens:   tokenResolver,
 		limiter:  NewLoginLimiter(5, 15*time.Minute),
 	}
 }

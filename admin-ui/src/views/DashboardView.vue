@@ -72,8 +72,8 @@
         <div v-if="activeBans.length" class="section-stack">
           <div v-for="item in activeBans.slice(0, 4)" :key="'dash-ban-' + item.newapi_user_id" class="list-row">
             <div class="cell-stack">
-              <div class="cell-title">{{ item.display_name || item.username || "用户 " + item.newapi_user_id }}</div>
-              <div class="cell-sub">ID {{ item.newapi_user_id }} · {{ item.reason || "无上下文" }}</div>
+              <div class="cell-title">{{ item.username || item.display_name || item.discord_name || "未命名用户" }}</div>
+              <div class="cell-sub">昵称：{{ item.display_name || item.discord_name || item.username || "未设置" }} · {{ item.reason || "无上下文" }}</div>
             </div>
             <n-button size="small" secondary @click="quickUnban(item)">解除</n-button>
           </div>

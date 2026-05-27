@@ -5,7 +5,7 @@
         v-model="userSearchDraft"
         class="app-input filter-input"
         type="text"
-        placeholder="搜索 newapi id、discord id、discord 名称或用户名"
+        placeholder="搜索用户名、昵称、Discord ID 或 Discord 名称"
         @keyup.enter="applyUserSearch"
       />
       <n-button type="primary" @click="applyUserSearch">搜索</n-button>
@@ -38,7 +38,7 @@
         <table>
           <thead>
             <tr>
-              <th>用户</th>
+              <th>用户名 / 昵称</th>
               <th>配额 / 状态</th>
               <th>身份映射</th>
               <th>操作</th>
@@ -48,9 +48,9 @@
             <tr v-for="item in users" :key="'user-' + item.newapi_user_id">
               <td>
                 <div class="cell-stack">
-                  <div class="cell-title">{{ item.display_name || item.username || "用户 " + item.newapi_user_id }}</div>
-                  <div class="cell-sub mono">newapi {{ item.newapi_user_id }}</div>
-                  <div class="cell-sub">{{ item.email || "未绑定邮箱" }}</div>
+                  <div class="cell-title">{{ item.username || item.display_name || item.discord_name || "未命名用户" }}</div>
+                  <div class="cell-sub">昵称：{{ item.display_name || item.discord_name || item.username || "未设置" }}</div>
+                  <div class="cell-sub">邮箱：{{ item.email || "未绑定" }}</div>
                 </div>
               </td>
               <td>

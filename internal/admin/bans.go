@@ -66,49 +66,70 @@ func (h *Handler) handleBans(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleActiveBans(w http.ResponseWriter, r *http.Request) {
-	adminToken := h.settings.GetString("newapi_admin_token")
-	if adminToken == "" {
-		webutil.WriteError(w, http.StatusServiceUnavailable, "未配置 New API 管理员令牌")
-		return
-	}
-
-	remoteUsers, err := h.fetchAllNewAPIUsers(r.Context(), adminToken)
-	if err != nil {
-		webutil.WriteError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-
 	contexts, err := h.loadBanContexts()
 	if err != nil {
 		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
+	adminToken := h.settings.GetString("newapi_admin_token")
+	remoteUsers := []newapi.User{}
+	remoteByID := map[int64]newapi.User{}
+	if adminToken != "" {
+		remoteUsers, err = h.fetchAllNewAPIUsers(r.Context(), adminToken)
+		if err != nil && len(contexts) == 0 {
+			webutil.WriteError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		if err == nil {
+			for _, user := range remoteUsers {
+				remoteByID[user.ID] = user
+			}
+		}
+	}
+
 	items := []map[string]any{}
+	seen := map[int64]bool{}
+	for userID, contextItem := range contexts {
+		seen[userID] = true
+		item := map[string]any{
+			"newapi_user_id": userID,
+			"status":         2,
+		}
+		if user, ok := remoteByID[userID]; ok {
+			if user.Username != "" {
+				item["username"] = user.Username
+			}
+			if user.DisplayName != "" {
+				item["display_name"] = user.DisplayName
+			}
+			item["status"] = user.Status
+			item["quota"] = user.Quota
+			item["group"] = user.Group
+			item["email"] = user.Email
+		}
+		for key, value := range contextItem {
+			item[key] = value
+		}
+		items = append(items, item)
+	}
+
 	for _, user := range remoteUsers {
-		if user.Status != 2 {
+		if user.Status != 2 || seen[user.ID] {
 			continue
 		}
 		_ = h.ensureLocalUserExists(user.ID)
-		contextItem, ok := contexts[user.ID]
-		item := map[string]any{
-			"newapi_user_id": user.ID,
-			"username":       user.Username,
-			"display_name":   user.DisplayName,
-			"status":         user.Status,
-			"quota":          user.Quota,
-			"group":          user.Group,
-			"email":          user.Email,
-		}
-		if ok {
-			for key, value := range contextItem {
-				item[key] = value
-			}
-		} else {
-			item["reason"] = "无上下文（可能直接在 New API 后台封禁）"
-			item["context_missing"] = true
-		}
-		items = append(items, item)
+		items = append(items, map[string]any{
+			"newapi_user_id":  user.ID,
+			"username":        user.Username,
+			"display_name":    user.DisplayName,
+			"status":          user.Status,
+			"quota":           user.Quota,
+			"group":           user.Group,
+			"email":           user.Email,
+			"reason":          "无上下文（可能直接在 New API 后台封禁）",
+			"context_missing": true,
+		})
 	}
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "items": items})
 }
@@ -244,7 +265,7 @@ func (h *Handler) createBan(r *http.Request, userID int64, reason, duration stri
 	}
 	adminToken := h.settings.GetString("newapi_admin_token")
 	if adminToken != "" {
-		if err := h.newapi.UpdateUserStatus(r.Context(), adminToken, userID, 2); err != nil {
+		if err := h.newapi.UpdateUserStatus(r.Context(), adminToken, userID, 2); err != nil && !newapi.IsNotFound(err) {
 			return err
 		}
 	}
@@ -285,7 +306,7 @@ func (h *Handler) unbanByID(r *http.Request, banID int64) error {
 func (h *Handler) unbanByUserID(r *http.Request, userID int64, onlyBanID *int64) error {
 	adminToken := h.settings.GetString("newapi_admin_token")
 	if adminToken != "" {
-		if err := h.newapi.UpdateUserStatus(r.Context(), adminToken, userID, 1); err != nil {
+		if err := h.newapi.UpdateUserStatus(r.Context(), adminToken, userID, 1); err != nil && !newapi.IsNotFound(err) {
 			return err
 		}
 	}
@@ -322,7 +343,7 @@ func (h *Handler) fetchAllNewAPIUsers(ctx context.Context, adminToken string) ([
 
 func (h *Handler) loadBanContexts() (map[int64]map[string]any, error) {
 	rows, err := h.db.Query(`SELECT b.id, b.newapi_user_id, b.discord_id, b.reason, b.violation_ua, b.client_ip, b.duration, b.expire_at, b.unbanned_at, b.created_at,
-		u.discord_name
+		u.username, u.display_name, u.discord_name
 		FROM bans b
 		LEFT JOIN users u ON u.newapi_user_id = b.newapi_user_id
 		WHERE b.unbanned_at IS NULL
@@ -345,9 +366,11 @@ func (h *Handler) loadBanContexts() (map[int64]map[string]any, error) {
 			expireAt    sql.NullString
 			unbannedAt  sql.NullString
 			createdAt   string
+			username    sql.NullString
+			displayName sql.NullString
 			discordName sql.NullString
 		)
-		if err := rows.Scan(&id, &userID, &discordID, &reason, &violationUA, &clientIP, &duration, &expireAt, &unbannedAt, &createdAt, &discordName); err != nil {
+		if err := rows.Scan(&id, &userID, &discordID, &reason, &violationUA, &clientIP, &duration, &expireAt, &unbannedAt, &createdAt, &username, &displayName, &discordName); err != nil {
 			return nil, err
 		}
 		if _, ok := items[userID]; ok {
@@ -355,6 +378,8 @@ func (h *Handler) loadBanContexts() (map[int64]map[string]any, error) {
 		}
 		items[userID] = map[string]any{
 			"id":              id,
+			"username":        username.String,
+			"display_name":    displayName.String,
 			"discord_id":      discordID.String,
 			"discord_name":    discordName.String,
 			"reason":          reason,

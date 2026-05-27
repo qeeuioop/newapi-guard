@@ -24,8 +24,9 @@
                 <tr v-for="item in banLogs" :key="'ban-log-' + item.id">
                   <td>
                     <div class="cell-stack">
-                      <div class="cell-title mono">{{ item.newapi_user_id }}</div>
-                      <div class="cell-sub">{{ item.discord_id || "未记录 Discord" }}</div>
+                      <div class="cell-title">{{ item.username || item.display_name || item.discord_name || "未命名用户" }}</div>
+                      <div class="cell-sub">昵称：{{ item.display_name || item.discord_name || item.username || "未设置" }}</div>
+                      <div class="cell-sub">Discord：{{ item.discord_name || item.discord_id || "未记录" }}</div>
                     </div>
                   </td>
                   <td>
@@ -57,7 +58,7 @@
 
         <n-tab-pane name="checkins" tab="签到日志">
           <div class="filters">
-            <input v-model="checkinFilter" class="app-input filter-input" type="text" placeholder="按 newapi 用户 ID 过滤" @keyup.enter="loadCheckinLogsAction" />
+            <input v-model="checkinFilter" class="app-input filter-input" type="text" placeholder="按用户名、昵称、Discord 或用户 ID 过滤" @keyup.enter="loadCheckinLogsAction" />
             <n-button secondary @click="loadCheckinLogsAction">应用过滤</n-button>
           </div>
           <div class="table-shell" v-if="checkinLogs.length">
@@ -71,7 +72,13 @@
               </thead>
               <tbody>
                 <tr v-for="item in checkinLogs" :key="'checkin-log-' + item.id">
-                  <td class="mono">{{ item.newapi_user_id }}</td>
+                  <td>
+                    <div class="cell-stack">
+                      <div class="cell-title">{{ item.username || item.display_name || item.discord_name || "未命名用户" }}</div>
+                      <div class="cell-sub">昵称：{{ item.display_name || item.discord_name || item.username || "未设置" }}</div>
+                      <div class="cell-sub">Discord：{{ item.discord_name || item.discord_id || "未记录" }}</div>
+                    </div>
+                  </td>
                   <td>{{ formatNumber(item.quota_added) }}</td>
                   <td>{{ item.checked_at }}</td>
                 </tr>

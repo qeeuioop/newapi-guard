@@ -24,11 +24,12 @@ type Handler struct {
 	settings      *settings.Store
 	cache         *cache.Store
 	newapi        *newapi.Client
+	tokens        *newapi.TokenResolver
 	proxy         *httputil.ReverseProxy
 	tokenCacheTTL time.Duration
 }
 
-func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cacheStore *cache.Store, newapiClient *newapi.Client) *Handler {
+func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cacheStore *cache.Store, newapiClient *newapi.Client, tokenResolver *newapi.TokenResolver) *Handler {
 	rp := &httputil.ReverseProxy{}
 	rp.FlushInterval = -1
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
@@ -54,6 +55,7 @@ func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cache
 		settings:      settingsStore,
 		cache:         cacheStore,
 		newapi:        newapiClient,
+		tokens:        tokenResolver,
 		proxy:         rp,
 		tokenCacheTTL: env.TokenCacheTTL,
 	}
@@ -71,27 +73,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Method == http.MethodGet {
-		userID, ok, err := h.resolveUserID(r.Context(), token)
-		if err != nil {
-			webutil.WriteError(w, http.StatusBadGateway, err.Error())
-			return
-		}
-		if ok && h.isUserBanned(userID) {
-			h.writeAccessDenied(w, "账户已封禁")
-			return
-		}
-		h.proxy.ServeHTTP(w, r)
-		return
-	}
-
 	userID, ok, err := h.resolveUserID(r.Context(), token)
 	if err != nil {
-		webutil.WriteError(w, http.StatusBadGateway, err.Error())
+		log.Printf("[proxy] resolve token failed: %v", err)
+		webutil.WriteError(w, http.StatusBadGateway, "无法验证 API Key")
 		return
 	}
 	if !ok {
-		h.proxy.ServeHTTP(w, r)
+		h.writeAccessDenied(w, "无法识别 API Key")
 		return
 	}
 
@@ -105,18 +94,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.allowedUA(r.UserAgent()) {
-		h.handleUAViolation(w, r, userID)
-		return
-	}
+	if r.Method != http.MethodGet {
+		if !h.allowedUA(r.UserAgent()) {
+			h.handleUAViolation(w, r, userID)
+			return
+		}
 
-	limit := h.settings.GetInt("rpm_limit", 3)
-	key := fmt.Sprintf("%d:%s", userID, time.Now().Format("200601021504"))
-	count := h.cache.IncrementRPM(key, time.Minute)
-	if count > limit {
-		h.bumpDailyStat("blocked_rpm")
-		h.writeRateLimitError(w, fmt.Sprintf("请求过于频繁，请稍后再试（%d/%d 次/分钟）", count, limit))
-		return
+		limit := h.settings.GetInt("rpm_limit", 3)
+		key := fmt.Sprintf("%d:%s", userID, time.Now().Format("200601021504"))
+		count := h.cache.IncrementRPM(key, time.Minute)
+		if count > limit {
+			h.bumpDailyStat("blocked_rpm")
+			h.writeRateLimitError(w, fmt.Sprintf("请求过于频繁，请稍后再试（%d/%d 次/分钟）", count, limit))
+			return
+		}
 	}
 
 	h.bumpDailyStat("total_requests")
@@ -134,13 +125,30 @@ func (h *Handler) resolveUserID(ctx context.Context, token string) (int64, bool,
 		return userID, true, nil
 	}
 
-	adminToken := h.settings.GetString("newapi_admin_token")
-	if adminToken == "" {
-		return 0, false, nil
-	}
-	resolved, ok, err := h.newapi.SearchToken(ctx, adminToken, token)
-	if err != nil || !ok {
+	resolvedToken, ok, err := h.tokens.ResolveToken(ctx, token)
+	resolved := resolvedToken.UserID
+	if err != nil {
 		return 0, false, err
+	}
+	if ok {
+		displayName := resolvedToken.DisplayName
+		if displayName == "" {
+			displayName = resolvedToken.Name
+		}
+		_, _ = h.db.Exec(`INSERT INTO users(newapi_user_id, username, display_name) VALUES(?, ?, ?)
+			ON CONFLICT(newapi_user_id) DO UPDATE SET
+				username=CASE WHEN excluded.username != '' THEN excluded.username ELSE users.username END,
+				display_name=CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE users.display_name END`, resolved, resolvedToken.Username, displayName)
+	}
+	if !ok {
+		adminToken := h.settings.GetString("newapi_admin_token")
+		if adminToken == "" {
+			return 0, false, nil
+		}
+		resolved, ok, err = h.newapi.SearchToken(ctx, adminToken, token)
+		if err != nil || !ok {
+			return 0, false, err
+		}
 	}
 	_, _ = h.db.Exec(`INSERT INTO users(newapi_user_id) VALUES(?) ON CONFLICT(newapi_user_id) DO NOTHING`, resolved)
 	_, _ = h.db.Exec(`INSERT INTO token_cache(token_key, newapi_user_id) VALUES(?, ?)
@@ -209,7 +217,7 @@ func (h *Handler) incrementUA(userID int64, ua string) int {
 func (h *Handler) banUser(ctx context.Context, userID int64, reason, ua, ip string) error {
 	adminToken := h.settings.GetString("newapi_admin_token")
 	if adminToken != "" {
-		if err := h.newapi.UpdateUserStatus(ctx, adminToken, userID, 2); err != nil {
+		if err := h.newapi.UpdateUserStatus(ctx, adminToken, userID, 2); err != nil && !newapi.IsNotFound(err) {
 			return err
 		}
 	}

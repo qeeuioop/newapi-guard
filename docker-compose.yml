@@ -3,7 +3,7 @@ services:
     image: ${NEWAPI_IMAGE:-calciumion/new-api:latest}
     restart: unless-stopped
     ports:
-      - "${NEWAPI_PORT:-3000}:3000"
+      - "${NEWAPI_BIND_ADDR:-127.0.0.1}:${NEWAPI_PORT:-3000}:3000"
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       NODE_NAME: ${NEWAPI_NODE_NAME:-new-api-node-1}
@@ -27,7 +27,7 @@ services:
     depends_on:
       - new-api
     ports:
-      - "${GUARD_PORT:-9000}:9000"
+      - "${GUARD_BIND_ADDR:-127.0.0.1}:${GUARD_PORT:-9000}:9000"
     environment:
       GUARD_LISTEN_ADDR: ${GUARD_LISTEN_ADDR:-:9000}
       GUARD_DATA_DIR: ${GUARD_DATA_DIR:-/app/data}
@@ -35,6 +35,7 @@ services:
       GUARD_WEB_DIR: ${GUARD_WEB_DIR:-/app/web}
       GUARD_ADMIN_PASSWORD: ${GUARD_ADMIN_PASSWORD:-change-me}
       GUARD_NEWAPI_URL: ${GUARD_NEWAPI_URL:-http://new-api:3000}
+      GUARD_NEWAPI_SQL_DSN: ${GUARD_NEWAPI_SQL_DSN:-postgresql://${POSTGRES_USER:-root}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-new-api}?sslmode=disable}
       GUARD_NEWAPI_ADMIN_TOKEN: ${GUARD_NEWAPI_ADMIN_TOKEN:-}
       GUARD_SESSION_TTL: ${GUARD_SESSION_TTL:-24h}
       GUARD_TOKEN_CACHE_TTL: ${GUARD_TOKEN_CACHE_TTL:-5m}

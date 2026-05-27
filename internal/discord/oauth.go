@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -81,7 +82,8 @@ func (h *Handler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.db.Exec(`INSERT INTO oauth_pending_states(state, client_id, redirect_uri, original_state, scope, expire_at)
 		VALUES(?, ?, ?, ?, ?, datetime('now', ?))`,
 		pendingState, clientID, redirectURI, state, scope, fmt.Sprintf("+%d seconds", h.settings.GetInt("oauth_state_ttl_seconds", 300))); err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[oauth] 保存登录状态失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "内部服务错误")
 		return
 	}
 
@@ -133,17 +135,20 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 
 	token, err := h.exchangeDiscordToken(r, discordCode)
 	if err != nil {
-		h.redirectError(w, r, redirectURI, originalState, "access_denied", err.Error())
+		log.Printf("[oauth] Discord token 交换失败: %v", err)
+		h.redirectError(w, r, redirectURI, originalState, "access_denied", "Discord 登录验证失败")
 		return
 	}
 	upstreamUser, err := h.fetchDiscordUser(r, token)
 	if err != nil {
-		h.redirectError(w, r, redirectURI, originalState, "access_denied", err.Error())
+		log.Printf("[oauth] Discord 用户信息获取失败: %v", err)
+		h.redirectError(w, r, redirectURI, originalState, "access_denied", "Discord 登录验证失败")
 		return
 	}
 	member, err := h.fetchDiscordGuildMember(r, token)
 	if err != nil {
-		h.redirectError(w, r, redirectURI, originalState, "access_denied", err.Error())
+		log.Printf("[oauth] Discord 身份组信息获取失败: %v", err)
+		h.redirectError(w, r, redirectURI, originalState, "access_denied", "Discord 登录验证失败")
 		return
 	}
 	if ok, reason := h.isAllowed(member); !ok {
@@ -159,6 +164,12 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		DisplayName:   displayName,
 		Email:         "",
 	}
+	_, _ = h.db.Exec(`INSERT INTO oauth_identity_links(discord_id, discord_name, preferred_username, updated_at)
+		VALUES(?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(discord_id) DO UPDATE SET
+			discord_name=excluded.discord_name,
+			preferred_username=excluded.preferred_username,
+			updated_at=CURRENT_TIMESTAMP`, upstreamUser.ID, payload.DisplayName, payload.PreferredName)
 	code := webutil.RandomToken(24)
 	codeTTL := time.Duration(h.settings.GetInt("oauth_code_ttl_seconds", 120)) * time.Second
 	rawPayload, _ := json.Marshal(payload)
@@ -166,7 +177,8 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		VALUES(?, ?, ?, ?, ?, ?, datetime('now', ?))`,
 		code, h.settings.GetString("oauth_client_id"), redirectURI, upstreamUser.ID, payload.Name, string(rawPayload), fmt.Sprintf("+%d seconds", int(codeTTL.Seconds())))
 	if err != nil {
-		h.redirectError(w, r, redirectURI, originalState, "server_error", err.Error())
+		log.Printf("[oauth] 保存授权码失败: %v", err)
+		h.redirectError(w, r, redirectURI, originalState, "server_error", "内部服务错误")
 		return
 	}
 	_, _ = h.db.Exec(`DELETE FROM oauth_pending_states WHERE state=?`, state)
@@ -221,7 +233,8 @@ func (h *Handler) handleToken(w http.ResponseWriter, r *http.Request) {
 	_, err := h.db.Exec(`INSERT INTO oauth_access_tokens(access_token, payload, expire_at) VALUES(?, ?, datetime('now', ?))`,
 		accessToken, payloadStr, fmt.Sprintf("+%d seconds", tokenTTL))
 	if err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[oauth] 保存访问令牌失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "内部服务错误")
 		return
 	}
 	_, _ = h.db.Exec(`UPDATE oauth_authorization_codes SET used_at=CURRENT_TIMESTAMP WHERE code=?`, code)
@@ -246,7 +259,8 @@ func (h *Handler) handleUserinfo(w http.ResponseWriter, r *http.Request) {
 	}
 	var payload oauthPayload
 	if err := json.Unmarshal([]byte(payloadStr), &payload); err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[oauth] 用户信息解析失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "内部服务错误")
 		return
 	}
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{

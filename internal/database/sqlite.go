@@ -48,6 +48,8 @@ func Migrate(db *sql.DB) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS users (
 			newapi_user_id INTEGER PRIMARY KEY,
+			username TEXT,
+			display_name TEXT,
 			discord_id TEXT UNIQUE,
 			discord_name TEXT,
 			is_whitelist INTEGER NOT NULL DEFAULT 0,
@@ -113,6 +115,13 @@ func Migrate(db *sql.DB) error {
 			expire_at DATETIME NOT NULL,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);`,
+		`CREATE TABLE IF NOT EXISTS oauth_identity_links (
+			discord_id TEXT PRIMARY KEY,
+			discord_name TEXT,
+			preferred_username TEXT,
+			newapi_user_id INTEGER,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);`,
 		`CREATE TABLE IF NOT EXISTS config (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL
@@ -138,6 +147,12 @@ func Migrate(db *sql.DB) error {
 		return err
 	}
 	if err := ensureColumn(db, "oauth_authorization_codes", "redirect_uri", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := ensureColumn(db, "users", "username", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := ensureColumn(db, "users", "display_name", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
 

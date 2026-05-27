@@ -48,8 +48,8 @@
             <tr v-for="item in filteredBans" :key="'ban-' + (item.id || item.newapi_user_id)">
               <td>
                 <div class="cell-stack">
-                  <div class="cell-title">{{ item.display_name || item.username || "用户 " + item.newapi_user_id }}</div>
-                  <div class="cell-sub mono">newapi {{ item.newapi_user_id }}</div>
+                  <div class="cell-title">{{ item.username || item.display_name || item.discord_name || "未命名用户" }}</div>
+                  <div class="cell-sub">昵称：{{ item.display_name || item.discord_name || item.username || "未设置" }}</div>
                   <div class="cell-sub">Discord：{{ item.discord_name || item.discord_id || "未记录" }}</div>
                 </div>
               </td>

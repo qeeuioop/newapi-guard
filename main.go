@@ -96,11 +96,16 @@ func main() {
 	runtimeCache := cache.New()
 	newAPIClient := newapi.NewClient(systemSettings.GetString("newapi_base_url"), 30*time.Second)
 	newAPIClient.SetAdminUserID(systemSettings.GetString("newapi_admin_user_id"))
+	tokenResolver, err := newapi.NewTokenResolver(env.NewAPISQLDSN)
+	if err != nil {
+		log.Fatalf("连接 NewAPI token 数据库失败: %v", err)
+	}
+	defer tokenResolver.Close()
 	adminSessions := admin.NewPersistentSessionStore(db, env.SessionTTL)
 
-	proxyHandler := proxy.NewHandler(env, db, systemSettings, runtimeCache, newAPIClient)
+	proxyHandler := proxy.NewHandler(env, db, systemSettings, runtimeCache, newAPIClient, tokenResolver)
 	checkinHandler := proxy.NewCheckinHandler(env, db, systemSettings, runtimeCache, newAPIClient)
-	adminHandler := admin.NewHandler(env, db, systemSettings, runtimeCache, adminSessions, newAPIClient)
+	adminHandler := admin.NewHandler(env, db, systemSettings, runtimeCache, adminSessions, newAPIClient, tokenResolver)
 	discordHandler := discord.NewHandler(env, db, systemSettings, newAPIClient)
 
 	mux := http.NewServeMux()

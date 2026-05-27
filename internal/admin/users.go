@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"strconv"
@@ -42,6 +43,16 @@ func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.syncDiscordOAuthBindings(r.Context()); err != nil {
+		webutil.WriteError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	localMap, err = h.loadLocalUserMap()
+	if err != nil {
+		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	var (
 		remoteUsers []newapi.User
 		total       int
@@ -60,7 +71,7 @@ func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request) {
 	seen := map[int64]struct{}{}
 	for _, remoteUser := range remoteUsers {
 		seen[remoteUser.ID] = struct{}{}
-		_ = h.ensureLocalUserExists(remoteUser.ID)
+		_ = h.upsertLocalUserIdentity(remoteUser.ID, remoteUser.Username, remoteUser.DisplayName)
 		items = append(items, h.buildUserItem(&remoteUser, localMap[remoteUser.ID]))
 	}
 
@@ -176,7 +187,7 @@ func (h *Handler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleWhitelist(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query(`SELECT newapi_user_id, discord_id, discord_name, created_at FROM users WHERE is_whitelist=1 ORDER BY created_at DESC`)
+	rows, err := h.db.Query(`SELECT newapi_user_id, username, display_name, discord_id, discord_name, created_at FROM users WHERE is_whitelist=1 ORDER BY created_at DESC`)
 	if err != nil {
 		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -186,16 +197,19 @@ func (h *Handler) handleWhitelist(w http.ResponseWriter, r *http.Request) {
 	var items []map[string]any
 	for rows.Next() {
 		var userID int64
-		var discordID, discordName sql.NullString
+		var username, displayName, discordID, discordName sql.NullString
 		var createdAt string
-		if err := rows.Scan(&userID, &discordID, &discordName, &createdAt); err != nil {
+		if err := rows.Scan(&userID, &username, &displayName, &discordID, &discordName, &createdAt); err != nil {
 			webutil.WriteError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		items = append(items, map[string]any{
 			"newapi_user_id": userID,
+			"username":       username.String,
+			"display_name":   displayName.String,
 			"discord_id":     discordID.String,
 			"discord_name":   discordName.String,
+			"is_whitelist":   true,
 			"created_at":     createdAt,
 		})
 	}
@@ -223,6 +237,8 @@ func (h *Handler) handleWhitelistToggle(w http.ResponseWriter, r *http.Request) 
 
 type localUserRecord struct {
 	UserID      int64
+	Username    string
+	DisplayName string
 	DiscordID   string
 	DiscordName string
 	IsWhitelist bool
@@ -230,12 +246,12 @@ type localUserRecord struct {
 }
 
 func (h *Handler) queryLocalUsers(page, size int, search string) ([]localUserRecord, error) {
-	query := `SELECT newapi_user_id, discord_id, discord_name, is_whitelist, created_at FROM users`
+	query := `SELECT newapi_user_id, username, display_name, discord_id, discord_name, is_whitelist, created_at FROM users`
 	args := []any{}
 	if search != "" {
-		query += ` WHERE CAST(newapi_user_id AS TEXT) LIKE ? OR discord_id LIKE ? OR discord_name LIKE ?`
+		query += ` WHERE CAST(newapi_user_id AS TEXT) LIKE ? OR username LIKE ? OR display_name LIKE ? OR discord_id LIKE ? OR discord_name LIKE ?`
 		pattern := "%" + search + "%"
-		args = append(args, pattern, pattern, pattern)
+		args = append(args, pattern, pattern, pattern, pattern, pattern)
 	}
 	query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
 	args = append(args, size, (page-1)*size)
@@ -249,11 +265,13 @@ func (h *Handler) queryLocalUsers(page, size int, search string) ([]localUserRec
 	items := []localUserRecord{}
 	for rows.Next() {
 		var record localUserRecord
-		var discordID, discordName sql.NullString
+		var username, displayName, discordID, discordName sql.NullString
 		var whitelist int
-		if err := rows.Scan(&record.UserID, &discordID, &discordName, &whitelist, &record.CreatedAt); err != nil {
+		if err := rows.Scan(&record.UserID, &username, &displayName, &discordID, &discordName, &whitelist, &record.CreatedAt); err != nil {
 			return nil, err
 		}
+		record.Username = username.String
+		record.DisplayName = displayName.String
 		record.DiscordID = discordID.String
 		record.DiscordName = discordName.String
 		record.IsWhitelist = whitelist == 1
@@ -263,7 +281,7 @@ func (h *Handler) queryLocalUsers(page, size int, search string) ([]localUserRec
 }
 
 func (h *Handler) loadLocalUserMap() (map[int64]localUserRecord, error) {
-	rows, err := h.db.Query(`SELECT newapi_user_id, discord_id, discord_name, is_whitelist, created_at FROM users`)
+	rows, err := h.db.Query(`SELECT newapi_user_id, username, display_name, discord_id, discord_name, is_whitelist, created_at FROM users`)
 	if err != nil {
 		return nil, err
 	}
@@ -272,11 +290,13 @@ func (h *Handler) loadLocalUserMap() (map[int64]localUserRecord, error) {
 	items := map[int64]localUserRecord{}
 	for rows.Next() {
 		var record localUserRecord
-		var discordID, discordName sql.NullString
+		var username, displayName, discordID, discordName sql.NullString
 		var whitelist int
-		if err := rows.Scan(&record.UserID, &discordID, &discordName, &whitelist, &record.CreatedAt); err != nil {
+		if err := rows.Scan(&record.UserID, &username, &displayName, &discordID, &discordName, &whitelist, &record.CreatedAt); err != nil {
 			return nil, err
 		}
+		record.Username = username.String
+		record.DisplayName = displayName.String
 		record.DiscordID = discordID.String
 		record.DiscordName = discordName.String
 		record.IsWhitelist = whitelist == 1
@@ -288,6 +308,8 @@ func (h *Handler) loadLocalUserMap() (map[int64]localUserRecord, error) {
 func (h *Handler) buildUserItem(remoteUser *newapi.User, localUser localUserRecord) map[string]any {
 	item := map[string]any{
 		"newapi_user_id": localUser.UserID,
+		"username":       localUser.Username,
+		"display_name":   localUser.DisplayName,
 		"discord_id":     localUser.DiscordID,
 		"discord_name":   localUser.DiscordName,
 		"is_whitelist":   localUser.IsWhitelist,
@@ -297,8 +319,12 @@ func (h *Handler) buildUserItem(remoteUser *newapi.User, localUser localUserReco
 		return item
 	}
 	item["newapi_user_id"] = remoteUser.ID
-	item["username"] = remoteUser.Username
-	item["display_name"] = remoteUser.DisplayName
+	if remoteUser.Username != "" {
+		item["username"] = remoteUser.Username
+	}
+	if remoteUser.DisplayName != "" {
+		item["display_name"] = remoteUser.DisplayName
+	}
 	item["status"] = remoteUser.Status
 	item["quota"] = remoteUser.Quota
 	item["group"] = remoteUser.Group
@@ -311,10 +337,43 @@ func (h *Handler) buildUserItem(remoteUser *newapi.User, localUser localUserReco
 	return item
 }
 
+func (h *Handler) syncDiscordOAuthBindings(ctx context.Context) error {
+	bindings, err := h.tokens.ListDiscordOAuthBindings(ctx)
+	if err != nil {
+		return err
+	}
+	for _, binding := range bindings {
+		if binding.UserID <= 0 || binding.DiscordID == "" {
+			continue
+		}
+		_, _ = h.db.Exec(`INSERT INTO users(newapi_user_id, username, display_name, discord_id, discord_name)
+			VALUES(?, ?, ?, ?, COALESCE(NULLIF((SELECT discord_name FROM oauth_identity_links WHERE discord_id=?), ''), ?))
+			ON CONFLICT(newapi_user_id) DO UPDATE SET
+				username=CASE WHEN excluded.username != '' THEN excluded.username ELSE users.username END,
+				display_name=CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE users.display_name END,
+				discord_id=excluded.discord_id,
+				discord_name=CASE WHEN excluded.discord_name != '' THEN excluded.discord_name ELSE users.discord_name END`,
+			binding.UserID, binding.Username, binding.DisplayName, binding.DiscordID, binding.DiscordID, binding.DisplayName)
+		_, _ = h.db.Exec(`UPDATE oauth_identity_links SET newapi_user_id=?, updated_at=CURRENT_TIMESTAMP WHERE discord_id=?`, binding.UserID, binding.DiscordID)
+	}
+	return nil
+}
+
 func (h *Handler) ensureLocalUserExists(userID int64) error {
 	if userID <= 0 {
 		return nil
 	}
 	_, err := h.db.Exec(`INSERT INTO users(newapi_user_id) VALUES(?) ON CONFLICT(newapi_user_id) DO NOTHING`, userID)
+	return err
+}
+
+func (h *Handler) upsertLocalUserIdentity(userID int64, username, displayName string) error {
+	if userID <= 0 {
+		return nil
+	}
+	_, err := h.db.Exec(`INSERT INTO users(newapi_user_id, username, display_name) VALUES(?, ?, ?)
+		ON CONFLICT(newapi_user_id) DO UPDATE SET
+			username=CASE WHEN excluded.username != '' THEN excluded.username ELSE users.username END,
+			display_name=CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE users.display_name END`, userID, username, displayName)
 	return err
 }

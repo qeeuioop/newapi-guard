@@ -29,6 +29,10 @@ func NewClient(baseURL string, timeout time.Duration) *Client {
 	}
 }
 
+func IsNotFound(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "record not found")
+}
+
 func (c *Client) SetBaseURL(baseURL string) {
 	c.mu.Lock()
 	c.baseURL = strings.TrimRight(baseURL, "/")
@@ -193,10 +197,24 @@ func (c *Client) TopupUser(ctx context.Context, adminToken string, userID int64,
 }
 
 func (c *Client) UpdateUserStatus(ctx context.Context, adminToken string, userID int64, status int) error {
+	user, err := c.GetUser(ctx, adminToken, userID)
+	if err != nil {
+		return err
+	}
 	body, _ := json.Marshal(map[string]any{
-		"id":     userID,
-		"status": status,
+		"id":           userID,
+		"username":     user.Username,
+		"display_name": user.DisplayName,
+		"email":        user.Email,
+		"group":        user.Group,
+		"quota":        user.Quota,
+		"role":         user.Role,
+		"status":       status,
 	})
+	return c.UpdateUser(ctx, adminToken, body)
+}
+
+func (c *Client) UpdateUser(ctx context.Context, adminToken string, body []byte) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.BaseURL()+"/api/user/", bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -211,7 +229,7 @@ func (c *Client) UpdateUserStatus(ctx context.Context, adminToken string, userID
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("更新用户状态失败: %d", resp.StatusCode)
+		return fmt.Errorf("更新用户失败: %d", resp.StatusCode)
 	}
 	return nil
 }
