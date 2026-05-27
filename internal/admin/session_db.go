@@ -29,7 +29,24 @@ func NewPersistentSessionStore(db *sql.DB, ttl time.Duration) *PersistentSession
 		ttl:      ttl,
 	}
 	store.loadFromDB()
+	go store.cleanupLoop()
 	return store
+}
+
+func (s *PersistentSessionStore) cleanupLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		now := time.Now()
+		s.mu.Lock()
+		for token, sess := range s.sessions {
+			if now.After(sess.ExpiresAt) {
+				delete(s.sessions, token)
+			}
+		}
+		s.mu.Unlock()
+		_, _ = s.db.Exec(`DELETE FROM admin_sessions WHERE expires_at <= CURRENT_TIMESTAMP`)
+	}
 }
 
 func (s *PersistentSessionStore) loadFromDB() {
@@ -61,9 +78,8 @@ func (s *PersistentSessionStore) Create() string {
 
 	s.mu.Lock()
 	s.sessions[token] = Session{Token: token, ExpiresAt: expiresAt}
-	s.mu.Unlock()
-
 	_, _ = s.db.Exec(`INSERT INTO admin_sessions(token, expires_at) VALUES(?, ?)`, token, expiresAt.Format(time.RFC3339))
+	s.mu.Unlock()
 	return token
 }
 

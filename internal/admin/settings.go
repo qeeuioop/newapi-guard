@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -64,7 +65,7 @@ func (h *Handler) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 	var payload map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	if err := webutil.ReadJSON(r, &payload); err != nil {
 		webutil.WriteError(w, http.StatusBadRequest, "请求体无效")
 		return
 	}
@@ -84,12 +85,22 @@ func (h *Handler) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
 			updates[key] = string(data)
 		}
 	}
+	if pwd, ok := updates["admin_password"]; ok {
+		hashed, err := webutil.HashPassword(pwd)
+		if err != nil {
+			log.Printf("[settings] 密码哈希失败: %v", err)
+			webutil.WriteError(w, http.StatusInternalServerError, "密码处理失败")
+			return
+		}
+		updates["admin_password"] = hashed
+	}
 	if len(updates) == 0 {
 		webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true})
 		return
 	}
 	if err := h.settings.Update(updates); err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[admin] 保存设置失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "保存设置失败")
 		return
 	}
 	if newAPIURL, ok := updates["newapi_base_url"]; ok && strings.TrimSpace(newAPIURL) != "" {

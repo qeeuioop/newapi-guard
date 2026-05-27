@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"database/sql"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,15 +14,16 @@ import (
 )
 
 func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request) {
-	page := parseIntDefault(r.URL.Query().Get("page"), 1)
-	size := parseIntDefault(r.URL.Query().Get("size"), 20)
+	page := parsePage(r.URL.Query().Get("page"))
+	size := parseSize(r.URL.Query().Get("size"), 20)
 	search := strings.TrimSpace(r.URL.Query().Get("search"))
 	adminToken := h.settings.GetString("newapi_admin_token")
 
 	if adminToken == "" {
 		localUsers, err := h.queryLocalUsers(page, size, search)
 		if err != nil {
-			webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+			log.Printf("[admin] 查询本地用户失败: %v", err)
+			webutil.WriteError(w, http.StatusInternalServerError, "查询用户失败")
 			return
 		}
 		items := make([]map[string]any, 0, len(localUsers))
@@ -37,19 +39,13 @@ func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.syncDiscordOAuthBindings(r.Context()); err != nil {
+		log.Printf("[admin] 同步 Discord 绑定失败: %v", err)
+	}
 	localMap, err := h.loadLocalUserMap()
 	if err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	if err := h.syncDiscordOAuthBindings(r.Context()); err != nil {
-		webutil.WriteError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	localMap, err = h.loadLocalUserMap()
-	if err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[admin] 加载本地用户表失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "加载用户数据失败")
 		return
 	}
 
@@ -63,7 +59,8 @@ func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request) {
 		remoteUsers, total, err = h.newapi.ListUsers(r.Context(), adminToken, page, size)
 	}
 	if err != nil {
-		webutil.WriteError(w, http.StatusBadGateway, err.Error())
+		log.Printf("[admin] 查询远程用户失败: %v", err)
+		webutil.WriteError(w, http.StatusBadGateway, "查询远程用户失败")
 		return
 	}
 
@@ -76,7 +73,7 @@ func (h *Handler) handleUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if search != "" {
-		localMatches, localErr := h.queryLocalUsers(1, maxInt(size*3, 100), search)
+		localMatches, localErr := h.queryLocalUsers(1, max(size*3, 100), search)
 		if localErr == nil {
 			for _, localUser := range localMatches {
 				if _, ok := seen[localUser.UserID]; ok {
@@ -148,7 +145,8 @@ func (h *Handler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	userID, err := h.newapi.CreateUser(r.Context(), adminToken, username, password)
 	if err != nil {
-		webutil.WriteError(w, http.StatusBadGateway, err.Error())
+		log.Printf("[admin] 创建远程用户失败: %v", err)
+		webutil.WriteError(w, http.StatusBadGateway, "创建用户失败")
 		return
 	}
 
@@ -160,14 +158,16 @@ func (h *Handler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 			is_whitelist=excluded.is_whitelist`,
 		userID, nullable(req.DiscordID), nullable(req.DiscordName), boolToInt(req.IsWhitelist))
 	if err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[admin] 保存本地用户记录失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "保存用户记录失败")
 		return
 	}
 	h.cache.SetWhitelist(userID, req.IsWhitelist)
 
 	if req.InitialQuota > 0 {
 		if err := h.newapi.TopupUser(r.Context(), adminToken, userID, req.InitialQuota); err != nil {
-			webutil.WriteError(w, http.StatusBadGateway, err.Error())
+			log.Printf("[admin] 充值配额失败: %v", err)
+			webutil.WriteError(w, http.StatusBadGateway, "充值配额失败")
 			return
 		}
 	}
@@ -189,7 +189,8 @@ func (h *Handler) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleWhitelist(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(`SELECT newapi_user_id, username, display_name, discord_id, discord_name, created_at FROM users WHERE is_whitelist=1 ORDER BY created_at DESC`)
 	if err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[admin] 查询白名单失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "查询白名单失败")
 		return
 	}
 	defer rows.Close()
@@ -200,7 +201,8 @@ func (h *Handler) handleWhitelist(w http.ResponseWriter, r *http.Request) {
 		var username, displayName, discordID, discordName sql.NullString
 		var createdAt string
 		if err := rows.Scan(&userID, &username, &displayName, &discordID, &discordName, &createdAt); err != nil {
-			webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+			log.Printf("[admin] 扫描白名单记录失败: %v", err)
+			webutil.WriteError(w, http.StatusInternalServerError, "读取白名单数据失败")
 			return
 		}
 		items = append(items, map[string]any{
@@ -212,6 +214,9 @@ func (h *Handler) handleWhitelist(w http.ResponseWriter, r *http.Request) {
 			"is_whitelist":   true,
 			"created_at":     createdAt,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[admin] 遍历白名单失败: %v", err)
 	}
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "items": items})
 }
@@ -228,7 +233,8 @@ func (h *Handler) handleWhitelistToggle(w http.ResponseWriter, r *http.Request) 
 		flag = 1
 	}
 	if _, err := h.db.Exec(`UPDATE users SET is_whitelist=? WHERE newapi_user_id=?`, flag, userID); err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[admin] 更新白名单状态失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "更新白名单失败")
 		return
 	}
 	h.cache.SetWhitelist(userID, flag == 1)

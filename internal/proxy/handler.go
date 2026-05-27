@@ -2,7 +2,9 @@ package proxy
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -62,6 +64,8 @@ func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, cache
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.bumpDailyStat("total_requests")
+
 	if r.Method == http.MethodOptions {
 		h.proxy.ServeHTTP(w, r)
 		return
@@ -99,18 +103,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.handleUAViolation(w, r, userID)
 			return
 		}
-
-		limit := h.settings.GetInt("rpm_limit", 3)
-		key := fmt.Sprintf("%d:%s", userID, time.Now().Format("200601021504"))
-		count := h.cache.IncrementRPM(key, time.Minute)
-		if count > limit {
-			h.bumpDailyStat("blocked_rpm")
-			h.writeRateLimitError(w, fmt.Sprintf("请求过于频繁，请稍后再试（%d/%d 次/分钟）", count, limit))
-			return
-		}
 	}
 
-	h.bumpDailyStat("total_requests")
+	limit := h.settings.GetInt("rpm_limit", 3)
+	key := fmt.Sprintf("%d:%s", userID, time.Now().Format("200601021504"))
+	count := h.cache.IncrementRPM(key, time.Minute)
+	if count > limit {
+		h.bumpDailyStat("blocked_rpm")
+		h.writeRateLimitError(w, fmt.Sprintf("请求过于频繁，请稍后再试（%d/%d 次/分钟）", count, limit))
+		return
+	}
+
 	h.proxy.ServeHTTP(w, r)
 }
 
@@ -120,7 +123,8 @@ func (h *Handler) resolveUserID(ctx context.Context, token string) (int64, bool,
 	}
 
 	var userID int64
-	if err := h.db.QueryRow(`SELECT newapi_user_id FROM token_cache WHERE token_key=? AND cached_at > datetime('now', ?)`, token, ttlSQLiteModifier(h.tokenCacheTTL)).Scan(&userID); err == nil {
+	tokenHash := hashToken(token)
+	if err := h.db.QueryRow(`SELECT newapi_user_id FROM token_cache WHERE token_key=? AND cached_at > datetime('now', ?)`, tokenHash, ttlSQLiteModifier(h.tokenCacheTTL)).Scan(&userID); err == nil {
 		h.cache.SetToken(token, userID, h.tokenCacheTTL)
 		return userID, true, nil
 	}
@@ -152,7 +156,7 @@ func (h *Handler) resolveUserID(ctx context.Context, token string) (int64, bool,
 	}
 	_, _ = h.db.Exec(`INSERT INTO users(newapi_user_id) VALUES(?) ON CONFLICT(newapi_user_id) DO NOTHING`, resolved)
 	_, _ = h.db.Exec(`INSERT INTO token_cache(token_key, newapi_user_id) VALUES(?, ?)
-		ON CONFLICT(token_key) DO UPDATE SET newapi_user_id=excluded.newapi_user_id, cached_at=CURRENT_TIMESTAMP`, token, resolved)
+		ON CONFLICT(token_key) DO UPDATE SET newapi_user_id=excluded.newapi_user_id, cached_at=CURRENT_TIMESTAMP`, tokenHash, resolved)
 	h.cache.SetToken(token, resolved, h.tokenCacheTTL)
 	return resolved, true, nil
 }
@@ -203,14 +207,13 @@ func (h *Handler) handleUAViolation(w http.ResponseWriter, r *http.Request, user
 
 func (h *Handler) incrementUA(userID int64, ua string) int {
 	var count int
-	_ = h.db.QueryRow(`SELECT count FROM ua_strikes WHERE newapi_user_id=?`, userID).Scan(&count)
-	count++
-	_, _ = h.db.Exec(`INSERT INTO ua_strikes(newapi_user_id, count, last_ua, last_strike_at)
-		VALUES(?, ?, ?, CURRENT_TIMESTAMP)
+	_ = h.db.QueryRow(`INSERT INTO ua_strikes(newapi_user_id, count, last_ua, last_strike_at)
+		VALUES(?, 1, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(newapi_user_id) DO UPDATE SET
-			count=excluded.count,
+			count=ua_strikes.count+1,
 			last_ua=excluded.last_ua,
-			last_strike_at=excluded.last_strike_at`, userID, count, ua)
+			last_strike_at=excluded.last_strike_at
+		RETURNING count`, userID, ua).Scan(&count)
 	return count
 }
 
@@ -247,22 +250,27 @@ func (h *Handler) banUser(ctx context.Context, userID int64, reason, ua, ip stri
 	return err
 }
 
-var allowedStatFields = map[string]bool{
-	"total_requests": true,
-	"blocked_ua":     true,
-	"blocked_rpm":    true,
-	"checkins":       true,
-	"new_users":      true,
-	"new_bans":       true,
-}
-
 func (h *Handler) bumpDailyStat(field string) {
-	if !allowedStatFields[field] {
-		return
-	}
 	today := time.Now().Format("2006-01-02")
 	_, _ = h.db.Exec(`INSERT INTO daily_stats(date) VALUES(?) ON CONFLICT(date) DO NOTHING`, today)
-	_, _ = h.db.Exec(`UPDATE daily_stats SET `+field+` = `+field+` + 1 WHERE date=?`, today)
+	var stmt string
+	switch field {
+	case "total_requests":
+		stmt = `UPDATE daily_stats SET total_requests = total_requests + 1 WHERE date=?`
+	case "blocked_ua":
+		stmt = `UPDATE daily_stats SET blocked_ua = blocked_ua + 1 WHERE date=?`
+	case "blocked_rpm":
+		stmt = `UPDATE daily_stats SET blocked_rpm = blocked_rpm + 1 WHERE date=?`
+	case "checkins":
+		stmt = `UPDATE daily_stats SET checkins = checkins + 1 WHERE date=?`
+	case "new_users":
+		stmt = `UPDATE daily_stats SET new_users = new_users + 1 WHERE date=?`
+	case "new_bans":
+		stmt = `UPDATE daily_stats SET new_bans = new_bans + 1 WHERE date=?`
+	default:
+		return
+	}
+	_, _ = h.db.Exec(stmt, today)
 }
 
 func (h *Handler) isUserBanned(userID int64) bool {
@@ -305,6 +313,11 @@ func extractToken(r *http.Request) string {
 		return token
 	}
 	return ""
+}
+
+func hashToken(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
 }
 
 func singleJoin(a, b string) string {

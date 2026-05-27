@@ -2,6 +2,7 @@ package cache
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -10,9 +11,9 @@ type TokenEntry struct {
 	ExpiresAt time.Time
 }
 
-type RPMEntry struct {
-	Count     int
-	ExpiresAt time.Time
+type rpmEntry struct {
+	count     atomic.Int32
+	expiresAt time.Time
 }
 
 type whitelistEntry struct {
@@ -26,7 +27,6 @@ type Store struct {
 	tokens sync.Map
 	users  sync.Map
 	rpm    sync.Map
-	rpmMu  sync.Mutex
 }
 
 func New() *Store {
@@ -42,7 +42,11 @@ func (s *Store) GetToken(token string) (int64, bool) {
 	if !ok {
 		return 0, false
 	}
-	entry := value.(TokenEntry)
+	entry, ok := value.(TokenEntry)
+	if !ok {
+		s.tokens.Delete(token)
+		return 0, false
+	}
 	if time.Now().After(entry.ExpiresAt) {
 		s.tokens.Delete(token)
 		return 0, false
@@ -76,21 +80,14 @@ func (s *Store) DeleteWhitelist(userID int64) {
 }
 
 func (s *Store) IncrementRPM(key string, ttl time.Duration) int {
-	s.rpmMu.Lock()
-	defer s.rpmMu.Unlock()
-
 	now := time.Now()
-	value, ok := s.rpm.Load(key)
-	var entry RPMEntry
-	if ok {
-		entry = value.(RPMEntry)
+	actual, loaded := s.rpm.LoadOrStore(key, &rpmEntry{expiresAt: now.Add(ttl)})
+	entry := actual.(*rpmEntry)
+	if loaded && now.After(entry.expiresAt) {
+		entry.count.Store(0)
+		entry.expiresAt = now.Add(ttl)
 	}
-	if !ok || now.After(entry.ExpiresAt) {
-		entry = RPMEntry{Count: 0, ExpiresAt: now.Add(ttl)}
-	}
-	entry.Count++
-	s.rpm.Store(key, entry)
-	return entry.Count
+	return int(entry.count.Add(1))
 }
 
 func (s *Store) Cleanup() {
@@ -102,7 +99,7 @@ func (s *Store) Cleanup() {
 		return true
 	})
 	s.rpm.Range(func(key, value any) bool {
-		if entry, ok := value.(RPMEntry); ok && now.After(entry.ExpiresAt) {
+		if entry, ok := value.(*rpmEntry); ok && now.After(entry.expiresAt) {
 			s.rpm.Delete(key)
 		}
 		return true

@@ -20,9 +20,26 @@ type SessionStore struct {
 }
 
 func NewSessionStore(ttl time.Duration) *SessionStore {
-	return &SessionStore{
+	s := &SessionStore{
 		sessions: map[string]Session{},
 		ttl:      ttl,
+	}
+	go s.cleanupLoop()
+	return s
+}
+
+func (s *SessionStore) cleanupLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		now := time.Now()
+		s.mu.Lock()
+		for token, sess := range s.sessions {
+			if now.After(sess.ExpiresAt) {
+				delete(s.sessions, token)
+			}
+		}
+		s.mu.Unlock()
 	}
 }
 

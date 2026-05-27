@@ -68,7 +68,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.withAuth(http.HandlerFunc(h.handleCreateUser)).ServeHTTP(w, r)
 	case r.URL.Path == "/guard/api/whitelist" && r.Method == http.MethodGet:
 		h.withAuth(http.HandlerFunc(h.handleWhitelist)).ServeHTTP(w, r)
-	case strings.HasPrefix(r.URL.Path, "/guard/api/whitelist/"):
+	case strings.HasPrefix(r.URL.Path, "/guard/api/whitelist/") && (r.Method == http.MethodPost || r.Method == http.MethodDelete):
 		h.withAuth(http.HandlerFunc(h.handleWhitelistToggle)).ServeHTTP(w, r)
 	case r.URL.Path == "/guard/api/bans" && r.Method == http.MethodGet:
 		h.withAuth(http.HandlerFunc(h.handleBans)).ServeHTTP(w, r)
@@ -108,7 +108,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	storedPassword := h.settings.GetString("admin_password")
-	if req.Password == "" || storedPassword == "" || !webutil.ConstantTimeEqual(req.Password, storedPassword) {
+	if req.Password == "" || storedPassword == "" || !webutil.CheckPassword(req.Password, storedPassword) {
 		h.limiter.RecordFailure(ip)
 		webutil.WriteError(w, http.StatusUnauthorized, "密码错误")
 		return
@@ -143,6 +143,14 @@ func parseIntDefault(value string, fallback int) int {
 	return fallback
 }
 
+func parsePage(value string) int {
+	return max(parseIntDefault(value, 1), 1)
+}
+
+func parseSize(value string, fallback int) int {
+	return min(max(parseIntDefault(value, fallback), 1), 200)
+}
+
 func nullable(value string) any {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -156,11 +164,4 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

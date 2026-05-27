@@ -2,15 +2,17 @@ package admin
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 	"strings"
 
+	"newapiguard/internal/newapi"
 	"newapiguard/internal/webutil"
 )
 
 func (h *Handler) handleBanLogs(w http.ResponseWriter, r *http.Request) {
-	page := parseIntDefault(r.URL.Query().Get("page"), 1)
-	size := parseIntDefault(r.URL.Query().Get("size"), 50)
+	page := parsePage(r.URL.Query().Get("page"))
+	size := parseSize(r.URL.Query().Get("size"), 50)
 	offset := (page - 1) * size
 	rows, err := h.db.Query(`SELECT b.id, b.newapi_user_id, b.discord_id, b.reason, b.violation_ua, b.client_ip, b.duration, b.expire_at, b.unbanned_at, b.created_at,
 		u.username, u.display_name, u.discord_name
@@ -18,7 +20,8 @@ func (h *Handler) handleBanLogs(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN users u ON u.newapi_user_id = b.newapi_user_id
 		ORDER BY b.created_at DESC LIMIT ? OFFSET ?`, size, offset)
 	if err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[admin] 查询封禁日志失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "查询封禁日志失败")
 		return
 	}
 	defer rows.Close()
@@ -30,7 +33,8 @@ func (h *Handler) handleBanLogs(w http.ResponseWriter, r *http.Request) {
 		var reason, duration, createdAt string
 		var violationUA, clientIP, expireAt, unbannedAt, username, displayName, discordName sql.NullString
 		if err := rows.Scan(&id, &userID, &discordID, &reason, &violationUA, &clientIP, &duration, &expireAt, &unbannedAt, &createdAt, &username, &displayName, &discordName); err != nil {
-			webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+			log.Printf("[admin] 扫描封禁日志行失败: %v", err)
+			webutil.WriteError(w, http.StatusInternalServerError, "读取封禁日志失败")
 			return
 		}
 		items = append(items, map[string]any{
@@ -49,12 +53,15 @@ func (h *Handler) handleBanLogs(w http.ResponseWriter, r *http.Request) {
 			"created_at":     createdAt,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[admin] 遍历封禁日志失败: %v", err)
+	}
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "page": page, "size": size, "items": items})
 }
 
 func (h *Handler) handleCheckinLogs(w http.ResponseWriter, r *http.Request) {
-	page := parseIntDefault(r.URL.Query().Get("page"), 1)
-	size := parseIntDefault(r.URL.Query().Get("size"), 50)
+	page := parsePage(r.URL.Query().Get("page"))
+	size := parseSize(r.URL.Query().Get("size"), 50)
 	userFilter := strings.TrimSpace(r.URL.Query().Get("user_id"))
 	offset := (page - 1) * size
 
@@ -69,12 +76,14 @@ func (h *Handler) handleCheckinLogs(w http.ResponseWriter, r *http.Request) {
 
 	records, err := h.tokens.ListCheckins(r.Context(), filterUserID, size, offset)
 	if err != nil {
-		webutil.WriteError(w, http.StatusBadGateway, err.Error())
+		log.Printf("[admin] 查询签到记录失败: %v", err)
+		webutil.WriteError(w, http.StatusBadGateway, "查询签到记录失败")
 		return
 	}
+	identityMap := h.batchLocalIdentities(records)
 	items := []map[string]any{}
 	for _, record := range records {
-		identity := h.localIdentity(record.UserID)
+		identity := identityMap[record.UserID]
 		items = append(items, map[string]any{
 			"id":             record.ID,
 			"newapi_user_id": record.UserID,
@@ -90,6 +99,45 @@ func (h *Handler) handleCheckinLogs(w http.ResponseWriter, r *http.Request) {
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "page": page, "size": size, "items": items})
 }
 
+func (h *Handler) batchLocalIdentities(records []newapi.CheckinRecord) map[int64]map[string]string {
+	result := map[int64]map[string]string{}
+	if len(records) == 0 {
+		return result
+	}
+	ids := make([]any, 0, len(records))
+	placeholders := make([]string, 0, len(records))
+	for _, r := range records {
+		if _, ok := result[r.UserID]; ok {
+			continue
+		}
+		result[r.UserID] = map[string]string{"username": "", "display_name": "", "discord_id": "", "discord_name": ""}
+		ids = append(ids, r.UserID)
+		placeholders = append(placeholders, "?")
+	}
+	if len(ids) == 0 {
+		return result
+	}
+	rows, err := h.db.Query(`SELECT newapi_user_id, username, display_name, discord_id, discord_name FROM users WHERE newapi_user_id IN (`+strings.Join(placeholders, ",")+`)`, ids...)
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid int64
+		var username, displayName, discordID, discordName sql.NullString
+		if err := rows.Scan(&uid, &username, &displayName, &discordID, &discordName); err != nil {
+			continue
+		}
+		result[uid] = map[string]string{
+			"username":     username.String,
+			"display_name": displayName.String,
+			"discord_id":   discordID.String,
+			"discord_name": discordName.String,
+		}
+	}
+	return result
+}
+
 func (h *Handler) localIdentity(userID int64) map[string]string {
 	identity := map[string]string{"username": "", "display_name": "", "discord_id": "", "discord_name": ""}
 	var username, displayName, discordID, discordName sql.NullString
@@ -102,11 +150,12 @@ func (h *Handler) localIdentity(userID int64) map[string]string {
 }
 
 func (h *Handler) handleStatsLogs(w http.ResponseWriter, r *http.Request) {
-	days := parseIntDefault(r.URL.Query().Get("days"), 30)
+	days := min(max(parseIntDefault(r.URL.Query().Get("days"), 30), 1), 365)
 	rows, err := h.db.Query(`SELECT date, total_requests, blocked_ua, blocked_rpm, checkins, new_users, new_bans
 		FROM daily_stats ORDER BY date DESC LIMIT ?`, days)
 	if err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[admin] 查询统计日志失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "查询统计数据失败")
 		return
 	}
 	defer rows.Close()
@@ -116,7 +165,8 @@ func (h *Handler) handleStatsLogs(w http.ResponseWriter, r *http.Request) {
 		var date string
 		var total, ua, rpm, checkins, newUsers, newBans int
 		if err := rows.Scan(&date, &total, &ua, &rpm, &checkins, &newUsers, &newBans); err != nil {
-			webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+			log.Printf("[admin] 扫描统计日志行失败: %v", err)
+			webutil.WriteError(w, http.StatusInternalServerError, "读取统计数据失败")
 			return
 		}
 		items = append(items, map[string]any{
@@ -128,6 +178,9 @@ func (h *Handler) handleStatsLogs(w http.ResponseWriter, r *http.Request) {
 			"new_users":      newUsers,
 			"new_bans":       newBans,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[admin] 遍历统计日志失败: %v", err)
 	}
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "items": items})
 }

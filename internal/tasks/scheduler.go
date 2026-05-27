@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"newapiguard/internal/cache"
@@ -43,17 +44,29 @@ func cleanupExpiredBans(db *sql.DB, settingsStore *settings.Store, client *newap
 	}
 	defer rows.Close()
 
-	adminToken := settingsStore.GetString("newapi_admin_token")
+	type expiredBan struct{ banID, userID int64 }
+	var expired []expiredBan
 	for rows.Next() {
-		var banID, userID int64
-		if err := rows.Scan(&banID, &userID); err != nil {
+		var b expiredBan
+		if err := rows.Scan(&b.banID, &b.userID); err != nil {
 			continue
 		}
+		expired = append(expired, b)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[tasks] cleanupExpiredBans scan error: %v", err)
+		return
+	}
+
+	adminToken := settingsStore.GetString("newapi_admin_token")
+	for _, b := range expired {
 		if adminToken != "" {
-			_ = client.UpdateUserStatus(context.Background(), adminToken, userID, 1)
+			if err := client.UpdateUserStatus(context.Background(), adminToken, b.userID, 1); err != nil {
+				log.Printf("[tasks] unban upstream user %d failed: %v", b.userID, err)
+			}
 		}
-		_, _ = db.Exec(`UPDATE bans SET unbanned_at=CURRENT_TIMESTAMP WHERE id=?`, banID)
-		_, _ = db.Exec(`DELETE FROM ua_strikes WHERE newapi_user_id=?`, userID)
+		_, _ = db.Exec(`UPDATE bans SET unbanned_at=CURRENT_TIMESTAMP WHERE id=?`, b.banID)
+		_, _ = db.Exec(`DELETE FROM ua_strikes WHERE newapi_user_id=?`, b.userID)
 	}
 }
 

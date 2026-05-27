@@ -81,7 +81,11 @@ func main() {
 		log.Fatalf("加载系统配置失败: %v", err)
 	}
 	if env.AdminPassword != "" {
-		_ = systemSettings.Update(map[string]string{"admin_password": env.AdminPassword})
+		hashed, err := webutil.HashPassword(env.AdminPassword)
+		if err != nil {
+			log.Fatalf("密码哈希失败: %v", err)
+		}
+		_ = systemSettings.Update(map[string]string{"admin_password": hashed})
 	}
 	if env.NewAPIAdminToken != "" {
 		_ = systemSettings.Update(map[string]string{"newapi_admin_token": env.NewAPIAdminToken})

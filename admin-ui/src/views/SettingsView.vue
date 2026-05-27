@@ -12,7 +12,7 @@
           </label>
           <label class="field">
             <span class="field-label">New API 管理员令牌</span>
-            <input v-model="settingsModel.newapi_admin_token" class="app-input" type="text" placeholder="用于用户与封禁操作" />
+            <input v-model="settingsModel.newapi_admin_token" class="app-input" type="password" placeholder="用于用户与封禁操作" autocomplete="off" />
           </label>
           <label class="field">
             <span class="field-label">控制台公开地址</span>
@@ -20,7 +20,7 @@
           </label>
           <label class="field">
             <span class="field-label">管理员密码</span>
-            <input v-model="settingsModel.admin_password" class="app-input" type="text" placeholder="控制台登录密码" />
+            <input v-model="settingsModel.admin_password" class="app-input" type="password" placeholder="控制台登录密码" autocomplete="off" />
           </label>
           <label class="field">
             <span class="field-label">用户级 RPM 限制</span>
@@ -99,7 +99,7 @@
           </label>
           <label class="field">
             <span class="field-label">OAuth Client Secret</span>
-            <input v-model="settingsModel.oauth_client_secret" class="app-input" type="text" autocomplete="off" />
+            <input v-model="settingsModel.oauth_client_secret" class="app-input" type="password" autocomplete="off" />
           </label>
           <label class="field">
             <span class="field-label">Provider Slug</span>
@@ -111,7 +111,7 @@
           </label>
           <label class="field">
             <span class="field-label">Discord Client Secret</span>
-            <input v-model="settingsModel.discord_client_secret" class="app-input" type="text" autocomplete="off" />
+            <input v-model="settingsModel.discord_client_secret" class="app-input" type="password" autocomplete="off" />
           </label>
           <label class="field">
             <span class="field-label">Discord Guild ID</span>

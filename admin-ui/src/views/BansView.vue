@@ -45,7 +45,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in filteredBans" :key="'ban-' + (item.id || item.newapi_user_id)">
+            <tr v-for="(item, index) in filteredBans" :key="'ban-' + (item.id || (item.newapi_user_id + '-' + index))">
               <td>
                 <div class="cell-stack">
                   <div class="cell-title">{{ item.username || item.display_name || item.discord_name || "未命名用户" }}</div>

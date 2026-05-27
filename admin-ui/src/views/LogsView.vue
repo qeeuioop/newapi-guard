@@ -58,7 +58,7 @@
 
         <n-tab-pane name="checkins" tab="签到日志">
           <div class="filters">
-            <input v-model="checkinFilter" class="app-input filter-input" type="text" placeholder="按用户名、昵称、Discord 或用户 ID 过滤" @keyup.enter="loadCheckinLogsAction" />
+            <input v-model="checkinFilter" class="app-input filter-input" type="text" placeholder="按用户 ID、用户名或 Discord ID 过滤" @keyup.enter="loadCheckinLogsAction" />
             <n-button secondary @click="loadCheckinLogsAction">应用过滤</n-button>
           </div>
           <div class="table-shell" v-if="checkinLogs.length">

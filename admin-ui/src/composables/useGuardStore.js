@@ -51,11 +51,12 @@ export function useGuardStore() {
     };
   });
 
+  const discreteProviderProps = computed(() => ({
+    theme: naiveTheme.value,
+    themeOverrides: themeOverrides.value
+  }));
   const { message, dialog } = createDiscreteApi(["message", "dialog"], {
-    configProviderProps: {
-      theme: naiveTheme.value,
-      themeOverrides: themeOverrides.value
-    }
+    configProviderProps: discreteProviderProps
   });
 
   // ─── Navigation ──────────────────────────────────────────
@@ -114,7 +115,8 @@ export function useGuardStore() {
   const authLoading = ref(false);
 
   // ─── Core UI state ───────────────────────────────────────
-  const pageLoading = ref(false);
+  const pageLoadingCount = ref(0);
+  const pageLoading = computed(() => pageLoadingCount.value > 0);
   const activeView = ref("dashboard");
   const sidebarCollapsed = ref(false);
   const logView = ref("bans");
@@ -559,7 +561,7 @@ OpenClash/`
   }
 
   async function performPageTask(task, successText, errorText) {
-    pageLoading.value = true;
+    pageLoadingCount.value++;
     try {
       const result = await task();
       if (successText) {
@@ -570,7 +572,7 @@ OpenClash/`
       message.error(error.message || errorText || "请求失败");
       throw error;
     } finally {
-      pageLoading.value = false;
+      pageLoadingCount.value--;
     }
   }
 
@@ -975,8 +977,9 @@ OpenClash/`
     if (auth.token) {
       try {
         await refreshAll();
-      } catch {
-        await logout(true);
+      } catch (err) {
+        if (!auth.token) return;
+        message.warning(err.message || "加载数据失败，请刷新页面重试");
       }
     }
   });

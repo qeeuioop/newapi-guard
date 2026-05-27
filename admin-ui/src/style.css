@@ -1045,7 +1045,7 @@ body::before {
 .table-shell {
   border: 1px solid var(--line);
   border-radius: 18px;
-  overflow: hidden;
+  overflow-x: auto;
   background: var(--surface-embedded);
 }
 

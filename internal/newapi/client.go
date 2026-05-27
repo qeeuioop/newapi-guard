@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -12,6 +13,12 @@ import (
 	"sync"
 	"time"
 )
+
+const maxResponseBody = 10 << 20 // 10 MB
+
+func decodeJSON(body io.Reader, target any) error {
+	return json.NewDecoder(io.LimitReader(body, maxResponseBody)).Decode(target)
+}
 
 type Client struct {
 	mu          sync.RWMutex
@@ -101,7 +108,7 @@ func (c *Client) SearchToken(ctx context.Context, adminToken, token string) (int
 	}
 
 	var payload map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := decodeJSON(resp.Body, &payload); err != nil {
 		return 0, false, err
 	}
 
@@ -152,7 +159,7 @@ func (c *Client) GetUserSelf(ctx context.Context, headers http.Header) (*UserSel
 		UserID int64 `json:"user_id"`
 		Quota  int   `json:"quota"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := decodeJSON(resp.Body, &payload); err != nil {
 		return nil, err
 	}
 
@@ -258,7 +265,7 @@ func (c *Client) CreateUser(ctx context.Context, adminToken, username, password 
 	}
 
 	var payload map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := decodeJSON(resp.Body, &payload); err != nil {
 		return 0, err
 	}
 	if value, ok := payload["user_id"]; ok {
@@ -307,7 +314,7 @@ func (c *Client) ListUsers(ctx context.Context, adminToken string, page, pageSiz
 		Message string   `json:"message"`
 		Data    UserPage `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := decodeJSON(resp.Body, &payload); err != nil {
 		return nil, 0, err
 	}
 	if !payload.Success {
@@ -338,7 +345,7 @@ func (c *Client) GetUser(ctx context.Context, adminToken string, userID int64) (
 		Message string `json:"message"`
 		Data    User   `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := decodeJSON(resp.Body, &payload); err != nil {
 		return nil, err
 	}
 	if !payload.Success {
@@ -369,7 +376,7 @@ func (c *Client) SearchUsers(ctx context.Context, adminToken, keyword string, pa
 		Message string   `json:"message"`
 		Data    UserPage `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := decodeJSON(resp.Body, &payload); err != nil {
 		return nil, 0, err
 	}
 	if !payload.Success {
@@ -400,6 +407,9 @@ func toInt64(value any) (int64, bool) {
 		return int64(v), true
 	case float64:
 		return int64(v), true
+	case json.Number:
+		parsed, err := v.Int64()
+		return parsed, err == nil
 	case string:
 		parsed, err := strconv.ParseInt(v, 10, 64)
 		return parsed, err == nil

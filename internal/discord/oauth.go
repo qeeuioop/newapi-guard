@@ -103,6 +103,7 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		state := r.URL.Query().Get("state")
 		var redirectURI, originalState string
 		_ = h.db.QueryRow(`SELECT redirect_uri, original_state FROM oauth_pending_states WHERE state=?`, state).Scan(&redirectURI, &originalState)
+		_, _ = h.db.Exec(`DELETE FROM oauth_pending_states WHERE state=?`, state)
 		h.redirectError(w, r, redirectURI, originalState, errMsg, r.URL.Query().Get("error_description"))
 		return
 	}
@@ -132,6 +133,7 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
+	_, _ = h.db.Exec(`DELETE FROM oauth_pending_states WHERE state=?`, state)
 
 	token, err := h.exchangeDiscordToken(r, discordCode)
 	if err != nil {
@@ -181,8 +183,6 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 		h.redirectError(w, r, redirectURI, originalState, "server_error", "内部服务错误")
 		return
 	}
-	_, _ = h.db.Exec(`DELETE FROM oauth_pending_states WHERE state=?`, state)
-
 	values := url.Values{}
 	values.Set("code", code)
 	values.Set("state", originalState)
@@ -445,8 +445,9 @@ func (h *Handler) publicBaseURL(r *http.Request) string {
 	if v := strings.TrimSpace(h.settings.GetString("public_base_url")); v != "" {
 		return strings.TrimRight(v, "/")
 	}
+	log.Printf("[oauth] 警告: public_base_url 未配置，使用请求头推断（可能被伪造）")
 	scheme := "https"
-	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "http" || proto == "https" {
 		scheme = proto
 	} else if r.TLS == nil {
 		scheme = "http"

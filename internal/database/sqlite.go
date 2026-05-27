@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	_ "modernc.org/sqlite"
 )
@@ -42,8 +43,23 @@ func Migrate(db *sql.DB) error {
 	}
 	var version int
 	if err := db.QueryRow(`SELECT version FROM schema_version LIMIT 1`).Scan(&version); err != nil {
-		_, _ = db.Exec(`INSERT INTO schema_version(version) VALUES(0)`)
+		if _, err := db.Exec(`INSERT INTO schema_version(version) VALUES(0)`); err != nil {
+			return fmt.Errorf("初始化 schema_version 失败: %w", err)
+		}
 	}
+	if version >= currentSchemaVersion {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("开始迁移事务失败: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
 
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS users (
@@ -138,31 +154,42 @@ func Migrate(db *sql.DB) error {
 	}
 
 	for _, stmt := range stmts {
-		if _, err := db.Exec(stmt); err != nil {
+		if _, err = tx.Exec(stmt); err != nil {
 			return err
 		}
 	}
 
-	if err := ensureColumn(db, "oauth_authorization_codes", "client_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
+	if err = ensureColumn(tx, "oauth_authorization_codes", "client_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
-	if err := ensureColumn(db, "oauth_authorization_codes", "redirect_uri", `TEXT NOT NULL DEFAULT ''`); err != nil {
+	if err = ensureColumn(tx, "oauth_authorization_codes", "redirect_uri", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
-	if err := ensureColumn(db, "users", "username", `TEXT NOT NULL DEFAULT ''`); err != nil {
+	if err = ensureColumn(tx, "users", "username", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
-	if err := ensureColumn(db, "users", "display_name", `TEXT NOT NULL DEFAULT ''`); err != nil {
+	if err = ensureColumn(tx, "users", "display_name", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
 
-	if _, err := db.Exec(`UPDATE schema_version SET version=?`, currentSchemaVersion); err != nil {
+	if _, err = tx.Exec(`UPDATE schema_version SET version=?`, currentSchemaVersion); err != nil {
 		return err
 	}
-	return nil
+	err = tx.Commit()
+	return err
 }
 
-func ensureColumn(db *sql.DB, table, column, def string) error {
+type dbExecer interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+var identifierRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+func ensureColumn(db dbExecer, table, column, def string) error {
+	if !identifierRe.MatchString(table) || !identifierRe.MatchString(column) {
+		return fmt.Errorf("非法标识符: %s.%s", table, column)
+	}
 	rows, err := db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
 	if err != nil {
 		return err

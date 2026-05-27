@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -26,7 +27,8 @@ func (h *Handler) handleBans(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(`SELECT id, newapi_user_id, discord_id, reason, violation_ua, client_ip, duration, expire_at, unbanned_at, created_at
 		FROM bans ORDER BY created_at DESC`)
 	if err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[admin] 查询封禁记录失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "查询封禁记录失败")
 		return
 	}
 	defer rows.Close()
@@ -46,7 +48,8 @@ func (h *Handler) handleBans(w http.ResponseWriter, r *http.Request) {
 			createdAt   string
 		)
 		if err := rows.Scan(&id, &userID, &discordID, &reason, &violationUA, &clientIP, &duration, &expireAt, &unbannedAt, &createdAt); err != nil {
-			webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+			log.Printf("[admin] 扫描封禁记录失败: %v", err)
+			webutil.WriteError(w, http.StatusInternalServerError, "读取封禁数据失败")
 			return
 		}
 		items = append(items, map[string]any{
@@ -62,13 +65,17 @@ func (h *Handler) handleBans(w http.ResponseWriter, r *http.Request) {
 			"created_at":     createdAt,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[admin] 遍历封禁记录失败: %v", err)
+	}
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "items": items})
 }
 
 func (h *Handler) handleActiveBans(w http.ResponseWriter, r *http.Request) {
 	contexts, err := h.loadBanContexts()
 	if err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[admin] 加载封禁上下文失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "加载封禁数据失败")
 		return
 	}
 
@@ -78,7 +85,8 @@ func (h *Handler) handleActiveBans(w http.ResponseWriter, r *http.Request) {
 	if adminToken != "" {
 		remoteUsers, err = h.fetchAllNewAPIUsers(r.Context(), adminToken)
 		if err != nil && len(contexts) == 0 {
-			webutil.WriteError(w, http.StatusBadGateway, err.Error())
+			log.Printf("[admin] 拉取远程用户失败: %v", err)
+			webutil.WriteError(w, http.StatusBadGateway, "获取远程用户失败")
 			return
 		}
 		if err == nil {
@@ -149,7 +157,7 @@ func (h *Handler) handleCreateBan(w http.ResponseWriter, r *http.Request) {
 	userID, err := h.resolveUserID(req.UserRef, req.UserID, req.DiscordID)
 	if err != nil || userID <= 0 || req.Reason == "" {
 		if err != nil {
-			webutil.WriteError(w, http.StatusBadRequest, err.Error())
+			webutil.WriteError(w, http.StatusBadRequest, "用户标识解析失败")
 		} else {
 			webutil.WriteError(w, http.StatusBadRequest, "参数不完整")
 		}
@@ -159,7 +167,8 @@ func (h *Handler) handleCreateBan(w http.ResponseWriter, r *http.Request) {
 		req.Duration = "permanent"
 	}
 	if err := h.createBan(r, userID, req.Reason, req.Duration); err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[admin] 创建封禁失败: %v", err)
+		webutil.WriteError(w, http.StatusInternalServerError, "创建封禁失败")
 		return
 	}
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true})
@@ -173,7 +182,8 @@ func (h *Handler) handleUnban(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.unbanByID(r, banID); err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[admin] 解封失败 (ban %d): %v", banID, err)
+		webutil.WriteError(w, http.StatusInternalServerError, "解封操作失败")
 		return
 	}
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true})
@@ -192,14 +202,15 @@ func (h *Handler) handleUnbanByUser(w http.ResponseWriter, r *http.Request) {
 	userID, err := h.resolveUserID(req.UserRef, req.UserID, req.DiscordID)
 	if err != nil || userID <= 0 {
 		if err != nil {
-			webutil.WriteError(w, http.StatusBadRequest, err.Error())
+			webutil.WriteError(w, http.StatusBadRequest, "用户标识解析失败")
 		} else {
 			webutil.WriteError(w, http.StatusBadRequest, "用户 ID 无效")
 		}
 		return
 	}
 	if err := h.unbanByUserID(r, userID, nil); err != nil {
-		webutil.WriteError(w, http.StatusInternalServerError, err.Error())
+		log.Printf("[admin] 解封失败 (user %d): %v", userID, err)
+		webutil.WriteError(w, http.StatusInternalServerError, "解封操作失败")
 		return
 	}
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true})
@@ -323,6 +334,8 @@ func (h *Handler) unbanByUserID(r *http.Request, userID int64, onlyBanID *int64)
 	return nil
 }
 
+const maxFetchUsers = 10000
+
 func (h *Handler) fetchAllNewAPIUsers(ctx context.Context, adminToken string) ([]newapi.User, error) {
 	page := 1
 	pageSize := 100
@@ -333,7 +346,7 @@ func (h *Handler) fetchAllNewAPIUsers(ctx context.Context, adminToken string) ([
 			return nil, err
 		}
 		all = append(all, items...)
-		if len(items) == 0 || len(all) >= total {
+		if len(items) == 0 || len(all) >= total || len(all) >= maxFetchUsers {
 			break
 		}
 		page++

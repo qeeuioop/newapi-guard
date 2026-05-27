@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func WriteJSON(w http.ResponseWriter, status int, value any) {
@@ -51,6 +53,21 @@ func ConstantTimeEqual(a, b string) bool {
 	ah := sha256.Sum256([]byte(a))
 	bh := sha256.Sum256([]byte(b))
 	return subtle.ConstantTimeCompare(ah[:], bh[:]) == 1
+}
+
+func HashPassword(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+func CheckPassword(password, stored string) bool {
+	if strings.HasPrefix(stored, "$2a$") || strings.HasPrefix(stored, "$2b$") {
+		return bcrypt.CompareHashAndPassword([]byte(stored), []byte(password)) == nil
+	}
+	return ConstantTimeEqual(password, stored)
 }
 
 func RandomToken(length int) string {
