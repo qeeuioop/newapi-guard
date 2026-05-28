@@ -111,7 +111,7 @@ func main() {
 	proxyHandler := proxy.NewHandler(env, db, systemSettings, runtimeCache, newAPIClient, tokenResolver)
 	checkinHandler := proxy.NewCheckinHandler(env, db, systemSettings, runtimeCache, newAPIClient)
 	adminHandler := admin.NewHandler(env, db, systemSettings, runtimeCache, adminSessions, newAPIClient, tokenResolver)
-	discordHandler := discord.NewHandler(env, db, systemSettings, newAPIClient)
+	discordHandler := discord.NewHandler(env, db, systemSettings, newAPIClient, tokenResolver)
 	upstreamHandler := upstream.NewHandler(systemSettings)
 
 	mux := http.NewServeMux()

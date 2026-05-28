@@ -1,6 +1,7 @@
 package discord
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -156,6 +157,25 @@ func (h *Handler) handleDiscordCallback(w http.ResponseWriter, r *http.Request) 
 	if ok, reason := h.isAllowed(member); !ok {
 		h.redirectError(w, r, redirectURI, originalState, "access_denied", reason)
 		return
+	}
+
+	if h.tokens != nil {
+		var existingUserID sql.NullInt64
+		_ = h.db.QueryRow(`SELECT newapi_user_id FROM oauth_identity_links WHERE discord_id=?`, upstreamUser.ID).Scan(&existingUserID)
+		if !existingUserID.Valid || existingUserID.Int64 <= 0 {
+			_ = h.db.QueryRow(`SELECT newapi_user_id FROM users WHERE discord_id=?`, upstreamUser.ID).Scan(&existingUserID)
+		}
+		if existingUserID.Valid && existingUserID.Int64 > 0 {
+			deleted, err := h.tokens.IsUserDeleted(r.Context(), existingUserID.Int64)
+			if err != nil {
+				log.Printf("[oauth] 检查用户删除状态失败: %v (discord_id=%s, user_id=%d)", err, upstreamUser.ID, existingUserID.Int64)
+			}
+			if deleted {
+				log.Printf("[oauth] 阻止已删号用户重新注册: discord_id=%s, old_user_id=%d", upstreamUser.ID, existingUserID.Int64)
+				h.redirectError(w, r, redirectURI, originalState, "access_denied", "账号已注销，无法重新注册。如需恢复请联系管理员。")
+				return
+			}
+		}
 	}
 
 	displayName := displayName(member, upstreamUser)

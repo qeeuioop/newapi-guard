@@ -83,6 +83,21 @@ func (r *TokenResolver) ListDiscordOAuthBindings(ctx context.Context) ([]Discord
 	return bindings, rows.Err()
 }
 
+func (r *TokenResolver) IsUserDeleted(ctx context.Context, userID int64) (bool, error) {
+	if r == nil || r.db == nil {
+		return false, nil
+	}
+	var deletedAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, `SELECT deleted_at FROM users WHERE id = $1`, userID).Scan(&deletedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return true, nil
+		}
+		return false, fmt.Errorf("查询用户删除状态失败: %w", err)
+	}
+	return deletedAt.Valid, nil
+}
+
 func (r *TokenResolver) Resolve(ctx context.Context, token string) (int64, bool, error) {
 	resolved, ok, err := r.ResolveToken(ctx, token)
 	return resolved.UserID, ok, err

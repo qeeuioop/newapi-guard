@@ -14,14 +14,16 @@ type Handler struct {
 	db       *sql.DB
 	settings *settings.Store
 	newapi   *newapi.Client
+	tokens   *newapi.TokenResolver
 }
 
-func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, newapiClient *newapi.Client) *Handler {
+func NewHandler(env config.Env, db *sql.DB, settingsStore *settings.Store, newapiClient *newapi.Client, tokenResolver *newapi.TokenResolver) *Handler {
 	return &Handler{
 		env:      env,
 		db:       db,
 		settings: settingsStore,
 		newapi:   newapiClient,
+		tokens:   tokenResolver,
 	}
 }
 
