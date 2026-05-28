@@ -25,7 +25,7 @@ var allowedSettingKeys = map[string]bool{
 	"oauth_state_ttl_seconds": true, "oauth_code_ttl_seconds": true, "oauth_token_ttl_seconds": true,
 	"discord_client_id": true, "discord_client_secret": true, "discord_guild_id": true,
 	"discord_oauth_scopes": true, "discord_access_policy": true,
-	"ua_auto_ban_duration": true,
+	"ua_auto_ban_duration": true, "prompt_cache_enabled": true,
 }
 
 func maskSecret(value string) string {
@@ -59,6 +59,7 @@ func (h *Handler) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 		"discord_oauth_scopes":    h.settings.GetStringSlice("discord_oauth_scopes"),
 		"discord_access_policy":   h.settings.GetString("discord_access_policy"),
 		"ua_auto_ban_duration":    h.settings.GetString("ua_auto_ban_duration"),
+		"prompt_cache_enabled":    h.settings.GetBool("prompt_cache_enabled", true),
 	}
 	webutil.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": data})
 }

@@ -37,6 +37,7 @@ var defaults = map[string]string{
 	"admin_password":              "",
 	"newapi_admin_token":          "",
 	"ua_auto_ban_duration":        "permanent",
+	"prompt_cache_enabled":        "true",
 }
 
 func NewStore(db *sql.DB) (*Store, error) {
@@ -115,6 +116,18 @@ func (s *Store) GetInt(key string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func (s *Store) GetBool(key string, fallback bool) bool {
+	raw := s.GetString(key)
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(raw)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func (s *Store) GetStringSlice(key string) []string {

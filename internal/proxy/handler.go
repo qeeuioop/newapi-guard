@@ -182,8 +182,9 @@ func (h *Handler) allowedUA(ua string) bool {
 	if len(allowed) == 0 {
 		return true
 	}
+	lowerUA := strings.ToLower(ua)
 	for _, prefix := range allowed {
-		if strings.HasPrefix(ua, prefix) {
+		if strings.HasPrefix(lowerUA, strings.ToLower(prefix)) {
 			return true
 		}
 	}

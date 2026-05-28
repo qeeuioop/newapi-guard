@@ -20,6 +20,7 @@ import (
 	"newapiguard/internal/proxy"
 	"newapiguard/internal/settings"
 	"newapiguard/internal/tasks"
+	"newapiguard/internal/upstream"
 	"newapiguard/internal/webutil"
 )
 
@@ -111,6 +112,7 @@ func main() {
 	checkinHandler := proxy.NewCheckinHandler(env, db, systemSettings, runtimeCache, newAPIClient)
 	adminHandler := admin.NewHandler(env, db, systemSettings, runtimeCache, adminSessions, newAPIClient, tokenResolver)
 	discordHandler := discord.NewHandler(env, db, systemSettings, newAPIClient)
+	upstreamHandler := upstream.NewHandler(systemSettings)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -122,6 +124,7 @@ func main() {
 	mux.Handle("/guard/static/", adminHandler)
 	mux.Handle("/guard/api/", adminHandler)
 	mux.Handle("/guard/oauth/", discordHandler)
+	mux.Handle("/upstream/anthropic/", http.StripPrefix("/upstream/anthropic", upstreamHandler))
 
 	srv := &http.Server{
 		Addr:              env.ListenAddr,
