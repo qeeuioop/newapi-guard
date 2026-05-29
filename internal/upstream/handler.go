@@ -38,6 +38,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		bodyBytes = injectCacheControl(bodyBytes)
 	}
 
+	if h.settings.GetBool("prompt_cache_debug", false) {
+		logCacheInjection(bodyBytes)
+	}
+
 	upstreamURL := anthropicUpstream + r.URL.Path
 	if r.URL.RawQuery != "" {
 		upstreamURL += "?" + r.URL.RawQuery
