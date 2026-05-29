@@ -13,6 +13,8 @@ type Session struct {
 	ExpiresAt time.Time
 }
 
+// SessionStore is kept as a lightweight in-memory implementation for tests or future non-persistent deployments.
+// main currently uses PersistentSessionStore from session_db.go so admin sessions survive restarts.
 type SessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]Session

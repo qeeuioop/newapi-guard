@@ -7,12 +7,16 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"newapiguard/internal/settings"
 	"newapiguard/internal/webutil"
 )
 
-const anthropicUpstream = "https://api.anthropic.com"
+const (
+	anthropicUpstream = "https://api.anthropic.com"
+	maxRequestBody    = 20 << 20 // 20 MB
+)
 
 type Handler struct {
 	settings *settings.Store
@@ -22,15 +26,20 @@ type Handler struct {
 func NewHandler(settingsStore *settings.Store) *Handler {
 	return &Handler{
 		settings: settingsStore,
-		client:   &http.Client{},
+		client:   &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	bodyBytes, err := io.ReadAll(r.Body)
+	if r.Method != http.MethodPost {
+		webutil.WriteError(w, http.StatusMethodNotAllowed, "仅支持 POST 请求")
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBody))
 	r.Body.Close()
 	if err != nil {
-		webutil.WriteError(w, http.StatusBadRequest, "读取请求体失败")
+		webutil.WriteError(w, http.StatusBadRequest, "读取请求体失败或请求体过大")
 		return
 	}
 

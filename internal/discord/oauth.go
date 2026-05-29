@@ -21,6 +21,8 @@ const (
 	discordMeURL        = "https://discord.com/api/v10/users/@me"
 )
 
+var discordHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
 type discordUser struct {
 	ID            string `json:"id"`
 	Username      string `json:"username"`
@@ -306,7 +308,7 @@ func (h *Handler) exchangeDiscordToken(r *http.Request, code string) (string, er
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := discordHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -333,7 +335,7 @@ func (h *Handler) fetchDiscordUser(r *http.Request, accessToken string) (*discor
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := discordHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -359,7 +361,7 @@ func (h *Handler) fetchDiscordGuildMember(r *http.Request, accessToken string) (
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := discordHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

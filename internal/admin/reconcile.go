@@ -8,6 +8,8 @@ import (
 	"newapiguard/internal/newapi"
 )
 
+// reconcileUsers is a conservative repair helper for historical Guard/NewAPI ID drift.
+// It is intentionally not wired into request paths; call it only from an explicit maintenance flow.
 func (h *Handler) reconcileUsers(ctx context.Context, adminToken string) map[int64]int64 {
 	mapping := map[int64]int64{}
 	if adminToken == "" {

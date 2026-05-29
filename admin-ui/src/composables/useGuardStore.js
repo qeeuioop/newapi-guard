@@ -175,7 +175,9 @@ export function useGuardStore() {
 
   const settingsModel = reactive({});
   const settingsText = reactive({
-    discord_oauth_scopes: ""
+    discord_oauth_scopes: "",
+    allowed_origins: "",
+    oauth_allowed_redirect_uris: ""
   });
   const allowedUADraft = reactive({
     items: [],
@@ -633,6 +635,8 @@ OpenClash/`
     const payload = data.data || {};
     Object.assign(settingsModel, clone(payload, {}));
     syncAllowedUADraft(payload.allowed_ua);
+    settingsText.allowed_origins = formatMaybeArray(payload.allowed_origins);
+    settingsText.oauth_allowed_redirect_uris = formatMaybeArray(payload.oauth_allowed_redirect_uris);
     settingsText.discord_oauth_scopes = formatMaybeArray(payload.discord_oauth_scopes);
     syncDiscordAccessPolicyDraft(payload.discord_access_policy);
   }
@@ -904,6 +908,14 @@ OpenClash/`
       const payload = clone(settingsModel, {});
       validatePolicyGroup(discordAccessPolicyDraft.value);
       payload.allowed_ua = [...allowedUADraft.items];
+      payload.allowed_origins = settingsText.allowed_origins
+        .split(/\n+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      payload.oauth_allowed_redirect_uris = settingsText.oauth_allowed_redirect_uris
+        .split(/\n+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
       payload.discord_oauth_scopes = settingsText.discord_oauth_scopes
         .split(/\n+/)
         .map((item) => item.trim())
@@ -921,6 +933,8 @@ OpenClash/`
 
   function resetSettingsDraft() {
     syncAllowedUADraft(settingsModel.allowed_ua);
+    settingsText.allowed_origins = formatMaybeArray(settingsModel.allowed_origins);
+    settingsText.oauth_allowed_redirect_uris = formatMaybeArray(settingsModel.oauth_allowed_redirect_uris);
     settingsText.discord_oauth_scopes = formatMaybeArray(settingsModel.discord_oauth_scopes);
     syncDiscordAccessPolicyDraft(settingsModel.discord_access_policy);
     message.info("已恢复为当前已加载配置");

@@ -15,6 +15,7 @@ import (
 
 	"newapiguard/internal/cache"
 	"newapiguard/internal/config"
+	"newapiguard/internal/guardban"
 	"newapiguard/internal/newapi"
 	"newapiguard/internal/settings"
 	"newapiguard/internal/webutil"
@@ -99,6 +100,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method != http.MethodGet {
+		// Keep GET (for example /v1/models) lenient: model-list/read requests should not count as UA violations.
+		// Actual API calls use POST and still enter UA strike / auto-ban handling.
 		if !h.allowedUA(r.UserAgent()) {
 			h.handleUAViolation(w, r, userID)
 			return
@@ -196,7 +199,7 @@ func (h *Handler) handleUAViolation(w http.ResponseWriter, r *http.Request, user
 	max := h.settings.GetInt("ua_ban_strikes", 3)
 	h.bumpDailyStat("blocked_ua")
 	if count >= max {
-		if err := h.banUser(r.Context(), userID, "ua_violation", r.UserAgent(), r.RemoteAddr); err != nil {
+		if err := h.banUser(r.Context(), userID, "ua_violation", r.UserAgent(), webutil.ClientIP(r)); err != nil {
 			h.writeAccessDenied(w, fmt.Sprintf("未在特定客户端内使用，账号已封禁（%d/%d）", count, max))
 			return
 		}
@@ -232,19 +235,10 @@ func (h *Handler) banUser(ctx context.Context, userID int64, reason, ua, ip stri
 	if duration == "" {
 		duration = "permanent"
 	}
-	var expireAt any
-	switch duration {
-	case "7d":
-		expireAt = time.Now().Add(7 * 24 * time.Hour).Format(time.RFC3339)
-	case "30d":
-		expireAt = time.Now().Add(30 * 24 * time.Hour).Format(time.RFC3339)
-	default:
-		duration = "permanent"
-		expireAt = nil
-	}
+	duration, expireAt := guardban.ExpireAtForDuration(duration, time.Now())
 
 	_, err := h.db.Exec(`INSERT INTO bans(newapi_user_id, discord_id, reason, violation_ua, client_ip, duration, expire_at, created_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, userID, discordID.String, reason, ua, ip, duration, expireAt)
+		VALUES(?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, userID, guardban.NullableString(discordID), reason, ua, ip, duration, expireAt)
 	if err == nil {
 		h.bumpDailyStat("new_bans")
 	}

@@ -19,6 +19,10 @@
             <input v-model="settingsModel.public_base_url" class="app-input" type="text" placeholder="可留空自动推断" />
           </label>
           <label class="field">
+            <span class="field-label">New API 管理员用户 ID</span>
+            <input v-model="settingsModel.newapi_admin_user_id" class="app-input" type="text" placeholder="通常为 1" />
+          </label>
+          <label class="field">
             <span class="field-label">管理员密码</span>
             <input v-model="settingsModel.admin_password" class="app-input" type="password" placeholder="控制台登录密码" autocomplete="off" />
           </label>
@@ -35,6 +39,35 @@
               <span class="field-hint" v-if="settingsModel.checkin_threshold">余额 ≥ ${{ (settingsModel.checkin_threshold / 500000).toFixed(2) }} 时禁止签到</span>
             </span>
             <input v-model.number="settingsModel.checkin_threshold" class="app-input" type="number" min="0" placeholder="0 表示不限制" />
+          </label>
+          <label class="field">
+            <span class="field-label">UA 自动封禁时长</span>
+            <select v-model="settingsModel.ua_auto_ban_duration" class="app-select">
+              <option value="permanent">永久封禁</option>
+              <option value="7d">7 天</option>
+              <option value="30d">30 天</option>
+            </select>
+          </label>
+        </div>
+        <div class="field field-full">
+          <span class="field-label">允许的跨域 Origin</span>
+          <textarea v-model="settingsText.allowed_origins" class="app-textarea" rows="4" placeholder="每行一个 Origin，例如 https://api.example.com"></textarea>
+          <p class="field-caption">留空时后端仅允许 public_base_url 对应的 Origin。</p>
+        </div>
+        <div class="compact-grid">
+          <label class="field checkbox-field">
+            <span class="field-label">Anthropic Prompt Cache 注入</span>
+            <span class="checkbox-row">
+              <input v-model="settingsModel.prompt_cache_enabled" class="app-checkbox" type="checkbox" />
+              <span class="checkbox-text">{{ settingsModel.prompt_cache_enabled ? "启用" : "关闭" }}</span>
+            </span>
+          </label>
+          <label class="field checkbox-field">
+            <span class="field-label">Prompt Cache 调试日志</span>
+            <span class="checkbox-row">
+              <input v-model="settingsModel.prompt_cache_debug" class="app-checkbox" type="checkbox" />
+              <span class="checkbox-text">{{ settingsModel.prompt_cache_debug ? "启用" : "关闭" }}</span>
+            </span>
           </label>
         </div>
         <div class="field field-full">
@@ -104,6 +137,10 @@
           <label class="field">
             <span class="field-label">Provider Slug</span>
             <input v-model="settingsModel.oauth_provider_slug" class="app-input" type="text" />
+          </label>
+          <label class="field field-full">
+            <span class="field-label">允许的 OAuth 回调地址</span>
+            <textarea v-model="settingsText.oauth_allowed_redirect_uris" class="app-textarea" rows="4" placeholder="每行一个完整 redirect_uri；留空时使用 public_base_url + /oauth/{slug}"></textarea>
           </label>
           <label class="field">
             <span class="field-label">Discord Client ID</span>

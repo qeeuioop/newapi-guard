@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"newapiguard/internal/guardban"
 	"newapiguard/internal/newapi"
 	"newapiguard/internal/webutil"
 )
@@ -284,19 +285,10 @@ func (h *Handler) createBan(r *http.Request, userID int64, reason, duration stri
 	var discordID sql.NullString
 	_ = h.db.QueryRow(`SELECT discord_id FROM users WHERE newapi_user_id=?`, userID).Scan(&discordID)
 
-	var expireAt any
-	switch duration {
-	case "7d":
-		expireAt = time.Now().Add(7 * 24 * time.Hour).Format(time.RFC3339)
-	case "30d":
-		expireAt = time.Now().Add(30 * 24 * time.Hour).Format(time.RFC3339)
-	default:
-		duration = "permanent"
-		expireAt = nil
-	}
+	duration, expireAt := guardban.ExpireAtForDuration(duration, time.Now())
 
 	if _, err := h.db.Exec(`INSERT INTO bans(newapi_user_id, discord_id, reason, duration, expire_at, created_at)
-		VALUES(?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, userID, discordID.String, reason, duration, expireAt); err != nil {
+		VALUES(?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, userID, guardban.NullableString(discordID), reason, duration, expireAt); err != nil {
 		return err
 	}
 
