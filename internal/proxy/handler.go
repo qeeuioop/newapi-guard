@@ -1,15 +1,18 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,9 +20,12 @@ import (
 	"newapiguard/internal/config"
 	"newapiguard/internal/guardban"
 	"newapiguard/internal/newapi"
+	"newapiguard/internal/promptcache"
 	"newapiguard/internal/settings"
 	"newapiguard/internal/webutil"
 )
+
+const maxMessagesRequestBody = 20 << 20 // 20 MB
 
 type Handler struct {
 	env           config.Env
@@ -117,7 +123,44 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.maybeInjectPromptCache(w, r); err != nil {
+		log.Printf("[proxy] prompt cache injection failed: %v", err)
+		webutil.WriteError(w, http.StatusBadRequest, "请求体无效或过大")
+		return
+	}
+
 	h.proxy.ServeHTTP(w, r)
+}
+
+func (h *Handler) maybeInjectPromptCache(w http.ResponseWriter, r *http.Request) error {
+	if r.Method != http.MethodPost || r.URL.Path != "/messages" {
+		return nil
+	}
+	if !h.settings.GetBool("prompt_cache_enabled", true) {
+		return nil
+	}
+
+	bodyBytes, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxMessagesRequestBody))
+	r.Body.Close()
+	if err != nil {
+		return err
+	}
+
+	newBody, report, changed := promptcache.Inject(bodyBytes, promptcache.Options{})
+	if h.settings.GetBool("prompt_cache_debug", false) {
+		promptcache.LogReport("/v1"+r.URL.Path, report)
+	}
+	if !changed {
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		r.ContentLength = int64(len(bodyBytes))
+		r.Header.Set("Content-Length", strconv.Itoa(len(bodyBytes)))
+		return nil
+	}
+
+	r.Body = io.NopCloser(bytes.NewReader(newBody))
+	r.ContentLength = int64(len(newBody))
+	r.Header.Set("Content-Length", strconv.Itoa(len(newBody)))
+	return nil
 }
 
 func (h *Handler) resolveUserID(ctx context.Context, token string) (int64, bool, error) {

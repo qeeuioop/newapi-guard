@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"newapiguard/internal/promptcache"
 	"newapiguard/internal/settings"
 	"newapiguard/internal/webutil"
 )
@@ -43,12 +44,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var report promptcache.Report
 	if h.settings.GetBool("prompt_cache_enabled", true) {
-		bodyBytes = injectCacheControl(bodyBytes)
+		bodyBytes, report, _ = promptcache.Inject(bodyBytes, promptcache.Options{})
 	}
 
 	if h.settings.GetBool("prompt_cache_debug", false) {
-		logCacheInjection(bodyBytes)
+		promptcache.LogReport("/upstream/anthropic"+r.URL.Path, report)
 	}
 
 	upstreamURL := anthropicUpstream + r.URL.Path

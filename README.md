@@ -165,6 +165,15 @@ NewAPI
 
 Guard 会先解析 API Key 与用户，并检查本地封禁状态。为了避免模型列表等读取类请求误封用户，`GET /v1/*` 不计入 UA 违规次数；真正调用模型的 `POST /v1/*` 才会进入 UA 白名单检查，违规达到 `ua_ban_strikes` 后自动封禁。RPM 限制仍按当前代码对已识别用户生效。
 
+### Anthropic Prompt Cache
+
+当后台 `prompt_cache_enabled=true` 时，Guard 会对 Anthropic Messages 请求自动注入 5 分钟 `cache_control`：
+
+- `/upstream/anthropic/*`：由 Guard 的 Anthropic upstream 代理注入
+- `POST /v1/messages`：由 Guard 的 `/v1` 代理在转发给 NewAPI 前注入
+
+`GET /v1/models` 不注入缓存，也不会因为 UA 不匹配计入违规。当前保持默认 5 分钟 TTL，不使用 1 小时缓存，因此 NewAPI 价格不需要调整：`CreateCacheRatio` 仍按 5 分钟缓存写入约 `1.25x` input，`CacheRatio` 仍按缓存读取约 `0.1x` input。若后台开启 `prompt_cache_debug=true`，Guard 日志只打印结构化命中辅助信息（路径、模型、是否注入、message index），不会打印用户 prompt 内容。
+
 ## Docker Compose 联合部署
 
 根目录已提供模板文件：[docker-compose.yml](./docker-compose.yml)
