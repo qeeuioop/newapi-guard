@@ -27,7 +27,13 @@ type Handler struct {
 func NewHandler(settingsStore *settings.Store) *Handler {
 	return &Handler{
 		settings: settingsStore,
-		client:   &http.Client{Timeout: 5 * time.Minute},
+		client: &http.Client{
+			Transport: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				ResponseHeaderTimeout: 10 * time.Minute,
+				IdleConnTimeout:       90 * time.Second,
+			},
+		},
 	}
 }
 

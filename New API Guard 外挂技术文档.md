@@ -883,7 +883,7 @@ Guard 作为透明代理，转发请求时需注意：
 - **请求转发**：原样透传所有请求头（Host 头替换为目标地址），原样透传请求 Body
 - **响应转发**：不缓冲响应 Body，直接流式透传；原样返回状态码和响应头
 - **SSE 支持**：当 New API 返回 `Content-Type: text/event-stream` 时，Guard 必须逐块转发，不能等待响应结束
-- **超时设置**：转发超时建议 300 秒（长对话场景），空闲超时建议 120 秒
+- **超时设置**：长输出建议客户端使用 `stream=true`；Nginx/OpenResty 的 `/v1/` 路径建议 `proxy_read_timeout 1800s`、`proxy_send_timeout 1800s`。Guard 自身的 Anthropic upstream 不应设置整请求 5 分钟总超时，避免长 SSE 在 300 秒附近被主动截断。
 
 ---
 

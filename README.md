@@ -388,6 +388,8 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_buffering off;
+        proxy_read_timeout 1800s;
+        proxy_send_timeout 1800s;
     }
 
     location = /api/user/checkin {
@@ -412,9 +414,14 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_buffering off;
+        proxy_read_timeout 1800s;
+        proxy_send_timeout 1800s;
     }
 }
 ```
+
+对于长输出或长时间流式响应，推荐客户端使用 `stream=true`。`/v1/` 这类长响应路径建议将 Nginx/OpenResty 的 `proxy_read_timeout` 和 `proxy_send_timeout` 提高到 1800 秒；Guard 的 Anthropic upstream 不应使用 5 分钟整请求总超时，否则长 SSE 会在 300 秒附近被主动切断。
 
 ### 现象和排查方向
 
